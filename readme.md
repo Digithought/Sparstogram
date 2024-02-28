@@ -1,8 +1,8 @@
 # Sparstogram Library
 
-Sparse, adaptive, scalable histogram in TypeScript
+Sparse/dense, adaptive, scalable histogram in TypeScript.  [On GitHub](https://github.com/Digithought/Sparstogram).
 
-This Typescript library provides a sophisticated data structure for efficiently characterizing large datasets through histograms.
+This Typescript library provides a sophisticated data structure for efficiently characterizing datasets through histograms.
 
 ## Summary
 
@@ -22,6 +22,7 @@ The implementation uses B+Trees to efficiently maintain the centroids and losses
 * Quantile information includes the centroid, variance, count, rank, and offset within bucket
 * Can compute local maxima ("peaks") with average window smoothing
 * Directional iteration of centroids from the ends, a marker, a value, or by loss
+* Scalable - uses in-memory B+Trees ([Digitree](https://github.com/Digithought/Digitree)) which are fast and balanced
 
 ### Why programmers need histograms
 
@@ -52,7 +53,9 @@ Or, if you prefer using `pnpm`:
 pnpm add sparstogram
 ```
 
-## Usage Examples
+## Usage
+
+#### [Reference Documentation](https://digithought.github.io/Sparstogram/)
 
 ### Creating a Sparstogram
 
