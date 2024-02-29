@@ -1,6 +1,6 @@
 # Sparstogram Library
 
-Sparse/dense, adaptive, scalable histogram in TypeScript.  [On GitHub](https://github.com/Digithought/Sparstogram).
+Sparse, adaptive, scalable histogram in TypeScript.  [On GitHub](https://github.com/Digithought/Sparstogram).
 
 This Typescript library provides a sophisticated data structure for efficiently characterizing datasets through histograms.
 
@@ -11,26 +11,28 @@ Sparstogram is a histogram that maintains a complete or sparse approximation of 
 The implementation uses B+Trees to efficiently maintain the centroids and losses, which is a self-balancing structure; so this should be able to scale efficiently.  As the number of unique data values grows beyond the configured `maxCentroids`, the loss returned from the `add` method will begin to be non-zero and represents how well the data in question compresses.  If and when this loss grows over some threshold, the user can choose to increase the `maxCentroids` value to maintain higher accuracy.  On the other hand, `maxCentroids` can by dynamically shrunk to reduce memory, at the expense of more approximation.
 
 ### Features:
-* Lossy or lossless depending on configured `maxCentroids`
-* Only allocates memory for actual distinct values
-* Adaptive to actual values given - works on any numerical scale
-* `maxCentroids` can be dynamically adjusted up or down
-* Add method returns the loss value, allowing dynamic growth to reduce loss
-* Can maintain quantile "markers", which maintain their relative rank without re-scanning
+* **Lossy or lossless** - depending on configured `maxCentroids`
+* **Adaptive** - works on any numerical scale, rescales dynamically
+* **Resizable** - `maxCentroids` can be dynamically adjusted up or down
+* **Reports loss** continually as items are added; allowing dynamic growth to reduce loss
+* **Quantile markers** - maintain relative rank points without re-scanning
   * Allows efficient maintenance of median, 95th percentile, etc. without traversal
-* Traversal based operations for finding rank by value, value by rank, or value by quantile are also provided
-* Quantile information includes the centroid, variance, count, rank, and offset within bucket
-* Can compute local maxima ("peaks") with average window smoothing
-* Directional iteration of centroids from the ends, a marker, a value, or by loss
-* Scalable - uses in-memory B+Trees ([Digitree](https://github.com/Digithought/Digitree)) which are fast and balanced
+* **Helper functions** - computed operations for finding rank by value, count by value, value by rank, value by quantile
+* **Rank interpolation** - interpolates the rank between and beyond each centroid using variances in a normal distribution
+* **Detailed quantile information** - includes: centroid, variance, count, rank, and offset within bucket
+* **Histogram merging** - including maintaining variances
+* **Peaks** - computes local maxima with average window smoothing
+* **Directional iteration** of centroid buckets from the ends, a marker, a value, or by loss
+* **Compact** - only allocates memory for actual distinct values
+* **Scalable** - uses in-memory B+Trees ([Digitree](https://github.com/Digithought/Digitree)) which are fast and balanced
 
-### Why programmers need histograms
+### Why software developers should use histograms more
 
-Sadly I never used histograms for most of my early career as a developer; I missed out.  Histograms are a powerful statistical tool that offer a frequency representation of the distribution of a dataset, making them invaluable for programmers across various disciplines. They provide a quick way to perceive the underlying distribution, outliers, skewness, and central tendency of data. For example, in image processing, histograms are crucial for scaling pixel values. By examining the histogram of an image's pixel intensities, you can accurately adjust the contrast and brightness, enhancing the image quality by stretching or compressing the range of pixel values to utilize the full spectrum more effectively.
+Histograms are often used in visualizing the frequency of occurrences, but many programmers don't know how useful histograms are as an analytical data structure.  Histograms are a powerful statistical tool that offer a frequency representation of the distribution of a dataset, which is useful across a variety of disciplines. There are many practical reasons for perceiving the distribution, outliers, skewness, range, magnitude, and central tendency of data. Just about any circumstance where there is signal with noise, histograms are invaluable for deciphering each, by establishing a cut-off quantile, or computing k-Means.
 
-In performance optimization and system monitoring, histograms play a vital role in determining timing thresholds. By generating a histogram of response times or execution times of a system, you can identify common performance bottlenecks and outliers. This enables you to set appropriate thresholds for alerts or to optimize system performance by focusing on the most impactful areas. For instance, understanding the distribution of database query times can help in optimizing indexes or rewriting queries to reduce the tail latencies that affect user experience.
+In image processing, histograms are crucial for scaling pixel values. By examining the histogram of an image's pixel intensities, you can accurately adjust the contrast and brightness, enhancing the image quality by stretching or compressing the range of pixel values to utilize the full spectrum more effectively.
 
-Histograms are also essential in signal processing and data analysis for deciphering noise from signal. You can differentiate between meaningful data patterns and random noise by establishing a cut-off quantile, or computing k-Means. In fields such as financial analysis, histograms can reveal the volatility of stock prices or the typical transaction sizes.
+In performance optimization, system monitoring, and distributed systems, histograms play a vital role in determining timing thresholds. By generating a histogram of response times or execution times of a system, you can identify common performance bottlenecks and outliers. This enables you to set appropriate thresholds for alerts or to optimize system performance by focusing on the most impactful areas. For instance, understanding the distribution of database query times can help in optimizing indexes or rewriting queries to reduce the tail latencies that affect user experience.
 
 ## Background
 
@@ -38,6 +40,7 @@ Sparstogram is inspired by the paper "Approximate Frequency Counts over Data Str
 * Utilizes B+Trees for maintaining centroids and their associated losses, facilitating efficient scaling and automatic balancing.
 * The variance within each centroid is also maintained to facilitate more accurate loss estimates
 * Persisting the centroids ordered by their losses allows merging of centroids without scanning
+* Persisted markers allows for determination of quantiles without scanning
 
 ## Installation
 
@@ -129,9 +132,8 @@ Contributions to the Digitree Sparstogram library are welcome! Here's how you ca
 - **Suggesting Enhancements:** For new features or improvements, open an issue with a clear title and description.
 - **Pull Requests:** For direct contributions, please make your changes in a separate branch and submit a pull request with a clear list of what you've done.
 
-TODO:
-* kMeans computation - maybe even an option to maintain?
-
+### TODO:
+* kMeans computation - maybe even an option to maintain?  (See https://github.com/Digithought/Histogram for a C# implementation)
 
 ### Environment
 

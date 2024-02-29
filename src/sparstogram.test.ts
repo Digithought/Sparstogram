@@ -4,7 +4,7 @@ describe('Sparstogram', () => {
   let sparstogram: Sparstogram;
 
   beforeEach(() => {
-    sparstogram = new Sparstogram(10, undefined); // Assuming maxCentroids is 10 for most tests
+    sparstogram = new Sparstogram(10); // Assuming maxCentroids is 10 for most tests
   });
 
   describe('add method', () => {
@@ -24,18 +24,20 @@ describe('Sparstogram', () => {
     });
 
     test('should compress centroids when exceeding maxCentroids', () => {
-      for (let i = 0; i < 20; i++) {
-        sparstogram.add(i);
+      for (let i = 0; i < 10; i++) {
+        expect(sparstogram.add(i)).toBe(0);	// Assuming no loss for up to maxCentroids
       }
-      expect(sparstogram.centroidCount).toBeLessThanOrEqual(10);
+      for (let i = 10; i < 20; i++) {
+        expect(sparstogram.add(i)).toBeGreaterThan(0); // Loss expected after compression
+      }
+      expect(sparstogram.centroidCount).toBe(10);
     });
 
     test('should accurately compute loss after compression', () => {
-      sparstogram = new Sparstogram(5, undefined); // Lower maxCentroids for this test
+      sparstogram = new Sparstogram(5); // Lower maxCentroids for this test
       for (let i = 0; i < 100; i++) {
         sparstogram.add(i);
       }
-      // Loss calculation is based on specific implementation details, so adjust expectation accordingly
       expect(sparstogram.add(101)).toBeGreaterThan(0);
     });
   });
@@ -50,51 +52,56 @@ describe('Sparstogram - atValue method', () => {
 
   beforeEach(() => {
     // Initialize Sparstogram with a reasonable number of centroids for testing
-    sparstogram = new Sparstogram(10, undefined);
+    sparstogram = new Sparstogram(10);
   });
 
   test('should return 0 for any value when histogram is empty', () => {
-    expect(sparstogram.atValue(5)).toBe(0);
+    expect(sparstogram.rankAt(5)).toBe(0);
   });
 
   test('should return the correct rank for a single value in the histogram', () => {
     sparstogram.add(10); // Add a single value
-    expect(sparstogram.atValue(5)).toBe(0); // Less than the added value
-    expect(sparstogram.atValue(10)).toBe(1); // Equal to the added value
-    expect(sparstogram.atValue(15)).toBe(1); // Greater than the added value
+    expect(sparstogram.rankAt(5)).toBe(0); // Less than the added value
+    expect(sparstogram.rankAt(10)).toBe(1); // Equal to the added value
+    expect(sparstogram.rankAt(15)).toBe(1); // Greater than the added value
   });
 
   test('should return correct ranks for multiple values in a dense distribution', () => {
     for (let i = 1; i <= 10; i++) {
       sparstogram.add(i); // Add values 1 through 10
     }
-    expect(sparstogram.atValue(0)).toBe(0); // No values are less than 0
-    expect(sparstogram.atValue(5)).toBe(5); // Five values are less than or equal to 5
-    expect(sparstogram.atValue(10)).toBe(10); // All values are less than or equal to 10
-    expect(sparstogram.atValue(11)).toBe(10); // All values are less than 11
+    expect(sparstogram.rankAt(0)).toBe(0); // No values are less than 1
+    expect(sparstogram.rankAt(5)).toBe(5); // Five values are less than or equal to 5
+    expect(sparstogram.rankAt(10)).toBe(10); // All values are less than or equal to 10
+    expect(sparstogram.rankAt(11)).toBe(10); // All values are less than 11
   });
 
-  test('should handle sparse distributions correctly', () => {
+  test('should handle sparse, non-uniform distributions correctly', () => {
     sparstogram.add(1);
     sparstogram.add(100);
     sparstogram.add(1000); // A sparse distribution of values
-    expect(sparstogram.atValue(50)).toBe(1); // Only one value is less than or equal to 50
-    expect(sparstogram.atValue(100)).toBe(2); // Two values are less than or equal to 100
-    expect(sparstogram.atValue(500)).toBe(2); // Still only two values less than or equal to 500
-    expect(sparstogram.atValue(1000)).toBe(3); // All values are less than or equal to 1000
+    expect(sparstogram.rankAt(50)).toBe(1); // Only one value is less than or equal to 50
+    expect(sparstogram.rankAt(100)).toBe(2); // Two values are less than or equal to 100
+    expect(sparstogram.rankAt(500)).toBe(2); // Still only two values less than or equal to 500
+    expect(sparstogram.rankAt(1000)).toBe(3); // All values are less than or equal to 1000
   });
 
   test('should accurately reflect ranks after adding duplicate values', () => {
     sparstogram.add(5);
     sparstogram.add(5); // Add duplicate value
     sparstogram.add(10);
-    expect(sparstogram.atValue(5)).toBe(2); // Two values are exactly 5
-    expect(sparstogram.atValue(6)).toBe(2); // Still two values less than or equal to 6
-    expect(sparstogram.atValue(10)).toBe(3); // All values are less than or equal to 10
+		// No merging, so expect discrete ranks for each value
+    expect(sparstogram.rankAt(4)).toBe(0);
+    expect(sparstogram.rankAt(5)).toBe(2);
+    expect(sparstogram.rankAt(6)).toBe(2);
+    expect(sparstogram.rankAt(9)).toBe(2);
+    expect(sparstogram.rankAt(10)).toBe(3);
+    expect(sparstogram.rankAt(11)).toBe(3);
+    expect(sparstogram.rankAt(1000)).toBe(3);
   });
 });
 
-describe('Sparstogram atRank method', () => {
+describe('Sparstogram valueAt method', () => {
   let sparstogram: Sparstogram;
 
   beforeEach(() => {
@@ -103,13 +110,13 @@ describe('Sparstogram atRank method', () => {
   });
 
   test('should return undefined for empty histogram', () => {
-    const result = sparstogram.atRank(0);
+    const result = sparstogram.valueAt(0);
     expect(result).toBeUndefined();
   });
 
   test('should return correct quantile for histogram with single item', () => {
     sparstogram.add(5); // Assuming add method correctly updates internal structures
-    const result = sparstogram.atRank(1);
+    const result = sparstogram.valueAt(1);
     expect(result.centroid.value).toBe(5);
     expect(result.centroid.count).toBe(1);
     expect(result.rank).toBe(1);
@@ -121,12 +128,12 @@ describe('Sparstogram atRank method', () => {
       sparstogram.add(i);
     }
     // Test a middle rank
-    const middleRankResult = sparstogram.atRank(5);
+    const middleRankResult = sparstogram.valueAt(5);
     expect(middleRankResult.centroid.value).toBeLessThanOrEqual(5);
     expect(middleRankResult.rank).toBe(5);
 
     // Test the highest rank
-    const highestRankResult = sparstogram.atRank(10);
+    const highestRankResult = sparstogram.valueAt(10);
     expect(highestRankResult.centroid.value).toBe(10);
     expect(highestRankResult.rank).toBe(10);
   });
@@ -135,12 +142,12 @@ describe('Sparstogram atRank method', () => {
     // Add items with sparse values
     [1, 100, 200].forEach(value => sparstogram.add(value));
     // Test rank that should fall within the first value
-    const lowRankResult = sparstogram.atRank(1);
+    const lowRankResult = sparstogram.valueAt(1);
     expect(lowRankResult.centroid.value).toBe(1);
     expect(lowRankResult.rank).toBe(1);
 
     // Test rank that should fall within the last value
-    const highRankResult = sparstogram.atRank(3);
+    const highRankResult = sparstogram.valueAt(3);
     expect(highRankResult.centroid.value).toBe(200);
     expect(highRankResult.rank).toBe(3);
   });
@@ -148,12 +155,12 @@ describe('Sparstogram atRank method', () => {
   test('should accurately reflect rank in a mixed-density histogram', () => {
     // Mix of dense and sparse values
     [1, 2, 2, 100].forEach(value => sparstogram.add(value));
-    const result = sparstogram.atRank(4);
+    const result = sparstogram.valueAt(4);
     expect(result.centroid.value).toBe(100);
     expect(result.rank).toBe(4);
 
     // Ensuring it handles lower ranks correctly
-    const lowerRankResult = sparstogram.atRank(2);
+    const lowerRankResult = sparstogram.valueAt(2);
     // Given the setup, rank 2 could still be at the first or second value due to duplicate values
     expect([1, 2]).toContain(lowerRankResult.centroid.value);
     expect(lowerRankResult.rank).toBe(2);
@@ -164,7 +171,7 @@ describe('Sparstogram atRank method', () => {
 		for (let i = 1; i <= 10; i++) {
 			sparstogram.add(i);
 		}
-		const quantileResult = sparstogram.atQuantile(0.5);
+		const quantileResult = sparstogram.quantileAt(0.5);
 		expect(quantileResult.centroid.value).toBe(5);
 		expect(quantileResult.rank).toBe(5);
 	});
@@ -176,16 +183,16 @@ describe('Sparstogram atRank method', () => {
 describe('atMarker method', () => {
   test('should return undefined for empty histogram', () => {
     const sparstogram = new Sparstogram(10, [0.5]); // Median marker
-    const marker = sparstogram.atMarker(0);
+    const marker = sparstogram.markerAt(0);
     expect(marker).toBeUndefined();
   });
 
   test('should return correct quantile for histogram with single value', () => {
     const sparstogram = new Sparstogram(10, [0, 0.5, 1]); // Min, median, max markers
     sparstogram.add(10); // Single value
-    const minMarker = sparstogram.atMarker(0);
-    const medianMarker = sparstogram.atMarker(1);
-    const maxMarker = sparstogram.atMarker(2);
+    const minMarker = sparstogram.markerAt(0);
+    const medianMarker = sparstogram.markerAt(1);
+    const maxMarker = sparstogram.markerAt(2);
 
     expect(minMarker).toBeDefined();
     expect(minMarker?.centroid.value).toBe(10);
@@ -202,9 +209,9 @@ describe('atMarker method', () => {
       sparstogram.add(i);
     }
 
-    const lowerQuartile = sparstogram.atMarker(0);
-    const median = sparstogram.atMarker(1);
-    const upperQuartile = sparstogram.atMarker(2);
+    const lowerQuartile = sparstogram.markerAt(0);
+    const median = sparstogram.markerAt(1);
+    const upperQuartile = sparstogram.markerAt(2);
 
     expect(lowerQuartile).toBeDefined();
     expect(lowerQuartile?.centroid.value).toBeLessThanOrEqual(25);
@@ -221,8 +228,8 @@ describe('atMarker method', () => {
     sparstogram.add(1);
     sparstogram.add(1000);
 
-    const tenthPercentile = sparstogram.atMarker(0);
-    const ninetiethPercentile = sparstogram.atMarker(1);
+    const tenthPercentile = sparstogram.markerAt(0);
+    const ninetiethPercentile = sparstogram.markerAt(1);
 
     expect(tenthPercentile).toBeDefined();
     expect(tenthPercentile?.centroid.value).toBeCloseTo(1, -1);
@@ -235,7 +242,7 @@ describe('atMarker method', () => {
     for (let i = 1; i <= 10; i++) {
       sparstogram.add(i);
     }
-    const nonExistentMarker = sparstogram.atMarker(1); // Attempting to access a marker that doesn't exist
+    const nonExistentMarker = sparstogram.markerAt(1); // Attempting to access a marker that doesn't exist
     expect(nonExistentMarker).toBeUndefined();
   });
 });
