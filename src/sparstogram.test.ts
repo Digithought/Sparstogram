@@ -471,3 +471,59 @@ describe('Sparstogram.mergeFrom', () => {
   // such as merging histograms where one is dense and the other sparse,
   // or testing with different maxCentroids values to observe the effect on compression.
 });
+
+describe('Sparstogram peaks method', () => {
+  let sparstogram: Sparstogram;
+
+  const addSeq = (values: number[]) => {
+    values.forEach((value, i) => Array(value).fill(i).forEach(x => sparstogram.add(x)));
+  };
+
+  beforeEach(() => {
+    sparstogram = new Sparstogram(100, undefined); // Adjust maxCentroids as needed
+  });
+
+  test('should return no peaks for a histogram with too few centroids to smooth', () => {
+    addSeq([1, 1, 1]); // Adding a few identical values
+    const peaks = Array.from(sparstogram.peaks());
+    expect(peaks.length).toBe(0); // Expect no peaks due to insufficient data for smoothing
+  });
+
+  test('should correctly identify a single peak in a simple dataset', () => {
+    addSeq([1, 2, 3, 4, 5, 4, 3, 2, 1]); // A clear peak at 5
+    const peaks = Array.from(sparstogram.peaks(1));
+    expect(peaks.length).toBe(1);
+    expect(peaks[0].max).toBe(5);
+    expect(peaks[0].min).toBe(1);	// latency from smoothing
+    expect(peaks[0].start).toBe(0);
+    expect(peaks[0].end).toBe(7);	// can't get last item for smoothing
+  });
+
+  test('should correctly identify multiple peaks in a complex dataset', () => {
+    addSeq([1, 2, 1, 4, 5, 4, 3, 3, 5, 7, 4, 3, 2, 3, 2, 1]); // Peaks at index 5 and 9
+    const peaks = Array.from(sparstogram.peaks());
+    expect(peaks.length).toBe(2);
+    expect(peaks[0].start).toBe(2);
+    expect(peaks[0].end).toBe(5);
+    expect(peaks[0].max).toBe(5);
+    expect(peaks[0].min).toBe(1);
+    expect(peaks[0].sum).toBe(14);
+    expect(peaks[1].start).toBe(6);
+    expect(peaks[1].end).toBe(12);
+    expect(peaks[1].max).toBe(7);
+    expect(peaks[1].min).toBe(2);
+    expect(peaks[1].sum).toBe(27);
+  });
+
+  test('should handle edge case when smoothing parameter is larger than the dataset', () => {
+    sparstogram = new Sparstogram(100, undefined); // Resetting with a large maxCentroids
+    addSeq([1, 2, 3, 2, 1]); // Simple dataset with a peak
+    const peaks = Array.from(sparstogram.peaks(10)); // Smoothing parameter larger than dataset
+    expect(peaks.length).toBe(0); // Expect no peaks due to excessive smoothing
+  });
+
+  // Additional tests should be added to cover more scenarios, such as:
+  // - Testing with different smoothing parameters
+  // - Testing with datasets that have flat peaks (plateaus)
+  // - Testing with very large datasets to ensure performance and correctness
+});

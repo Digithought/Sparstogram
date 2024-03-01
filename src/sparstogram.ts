@@ -253,14 +253,14 @@ export class Sparstogram {
 	}
 
 	/** Computes the peaks in the histogram.
-	 * This is a simple peak detection algorithm that finds local maxima in the histogram.
+	 * This is a simple peak detection algorithm that finds local maxima in the histogram for frequency of cluster detection.
 	 * A peak is defined as a local maximum where the count is greater than the counts of the centroids on either side.
 	 * If there are too few centroids to allow for the given smoothing in the histogram, no peaks will be returned
 	 * @param smoothing The number of centroids in each "direction" to consider for smoothing the peaks (default 3)
 	 * @returns Iterator for the computed Peak entries in the histogram
 	 */
 	*peaks(smoothing: number = 3): IterableIterator<Peak> {
-		let left = new Array<Centroid>();
+		let left = new Array<Centroid>();	// TODO: replace these with ring buffers
 		let right = new Array<Centroid>();
 		const result: Peak[] = [];
 		let peak: Peak | undefined;
@@ -284,7 +284,7 @@ export class Sparstogram {
 					peak = undefined;
 					trend = 1;
 				}
-				peak = updatePeak(right[0], peak);
+				peak = updatePeak(left.at(-1)!, peak);
 			}
 		}
 		if (peak) {

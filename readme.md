@@ -21,7 +21,7 @@ The implementation uses B+Trees to efficiently maintain the centroids and losses
 * **Rank interpolation** - interpolates the rank between and beyond each centroid using variances in a normal distribution
 * **Detailed quantile information** - includes: centroid, variance, count, rank, and offset within bucket
 * **Histogram merging** - including maintaining variances
-* **Peaks** - computes local maxima with average window smoothing
+* **Peaks** - computes local maxima with average window smoothing, for use in frequency detection or clustering
 * **Directional iteration** of centroid buckets from the ends, a marker, a value, or by loss
 * **Compact** - only allocates memory for actual distinct values
 * **Scalable** - uses in-memory B+Trees ([Digitree](https://github.com/Digithought/Digitree)) which are fast and balanced
