@@ -1,6 +1,6 @@
 {
   "name": "sparstogram",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "target": "module",
   "description": "Sparse, adaptive, scalable histogram in TypeScript",
   "main": "./dist/index.js",
