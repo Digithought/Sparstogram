@@ -114,11 +114,44 @@ export class Sparstogram {
 	 */
 	add(value: number): number {
 		++this._count;
-		this.insertOrIncrementBucket(value);
+		this.insertOrIncrementBucket({ value, variance: 0, count: 1 });
 		if (this._centroidCount > this._maxCentroids) {
 			return this.compressOneBucket();
 		}
 		return 0;	// No loss if new bucket is inserted
+	}
+
+	/** Adds a centroid to the histogram.
+	 * If you want to dynamically limit loss, monitor the returned loss and adjust maxCentroids accordingly.
+	 * @returns The loss incurred by compression, if any
+	 */
+	append(centroid: Centroid) {	// Not very DRY, but performance critical
+		if (centroid.count < 1) {
+			throw new Error("Centroid count must be at least 1");
+		}
+		if (centroid.variance < 0) {
+			throw new Error("Centroid variance must be at least 0");
+		}
+		this._count += centroid.count;
+		this.insertOrIncrementBucket(centroid);
+		if (this._centroidCount > this._maxCentroids) {
+			return this.compressOneBucket();
+		}
+		return 0;	// No loss if new bucket is inserted
+	}
+
+	/** Merges all the centroids from another histogram into this one.
+	 * Adds all centroids before compressing to incur the least loss.
+	 * If you want to reduce memory usage, or monitor loss, use an iterator with append rather than this method.
+	 */
+	mergeFrom(other: Sparstogram) {
+		this._count += other.count;
+		for (const centroid of other.ascending()) {
+			this.insertOrIncrementBucket(centroid);
+		}
+		while (this._centroidCount > this._maxCentroids) {
+			this.compressOneBucket();
+		}
 	}
 
 	/** Returns the rank of a value in the histogram - count of all values less than or equal to the given value
@@ -164,7 +197,7 @@ export class Sparstogram {
 		for (const path of this._centroids.ascending(this._centroids.first())) {
 			const entry = this._centroids.at(path)!;
 			if (remainingRank <= entry.count) {
-				return { rank, centroid: entry, offset: remainingRank, value: inferValueFromOffset(remainingRank, entry)};
+				return { rank, centroid: entry, offset: remainingRank - 1, value: inferValueFromOffset(remainingRank - 1, entry) };
 			}
 			remainingRank -= entry.count;
 		}
@@ -184,13 +217,13 @@ export class Sparstogram {
 			const next = this._centroids.next(path);
 			const prior = this._centroids.prior(path);
 			if (next.on && prior.on) {
-				return interpolateRank(value, this._centroids.at(prior)!, this._centroids.at(next)!);
+				return interpolateCount(value, this._centroids.at(prior)!, this._centroids.at(next)!);
 			}
 			else if (next.on) {
-				return inferRank(value, this._centroids.at(next)!);
+				return inferCount(value, this._centroids.at(next)!);
 			}
 			else if (prior.on) {
-				return inferRank(value, this._centroids.at(prior)!);
+				return inferCount(value, this._centroids.at(prior)!);
 			}
 			return 0;	// no data - count is 0 everywhere
 		}
@@ -298,24 +331,22 @@ export class Sparstogram {
 	}
 
 	/** Inserts a new value into the histogram or increments the count of the existing bucket */
-	private insertOrIncrementBucket(value: number) {
-		const path = this._centroids.find(value);
+	private insertOrIncrementBucket(centroid: Centroid) {
+		const path = this._centroids.find(centroid.value);
 		if (path.on) {
 			const entry = this._centroids.at(path)!;
-			const count = entry.count + 1;
-			const newCentroid = { value: entry.value, count, variance: (entry.variance * entry.count) / count };
+			const newCentroid = combineSharedMean(entry, centroid);
 			const newLoss = this.getPriorLoss(path, newCentroid);
 			this._centroids.updateAt(path, { ...newCentroid, loss: newLoss });
 			this._losses.updateAt(this._losses.find(entry), { loss: newLoss, value: entry.value });
 			this.updateNext(path, newCentroid);
 		} else {
 			++this._centroidCount;
-			const newCentroid = { value: value, count: 1, variance: 0 };
-			const loss = this.getPriorLoss(path, newCentroid);
-			const newPath = this._centroids.insert({ ...newCentroid, loss });
-			this._losses.insert({ loss, value: value });
-			this.updateNext(newPath, newCentroid);
-			this.updateMarkers(value);
+			const loss = this.getPriorLoss(path, centroid);
+			const newPath = this._centroids.insert({ ...centroid, loss });
+			this._losses.insert({ loss, value: centroid.value });
+			this.updateNext(newPath, centroid);
+			this.updateMarkers(centroid.value);
 		}
 	}
 
@@ -324,15 +355,15 @@ export class Sparstogram {
 		if (this._markers) {
 			for (let i = 0; i < this._markers.length; ++i) {
 				let quantile = this._markers[i];
-				if (!quantile) {	// first and only quantile
-					this._markers[i] = quantile = { rank: 0, centroid: this._centroids.at(this._centroids.first())!, offset: 0 };
+				if (!quantile) {	// this must be the first centroid
+					this._markers[i] = quantile = { rank: 1, centroid: this._centroids.at(this._centroids.first())!, offset: 0 };
 				} else {
 					if (value < quantile.centroid.value) {
 						++quantile.rank;
 					}
-					const newRank = Math.round(this.markers![i] * this._count);
+					const newRank = Math.round(this.markers![i] * (this._count - 1)) + 1;	// Rank is 1 based
 					if (newRank > quantile.rank) {
-						if (quantile.offset < quantile.centroid.count) {
+						if (quantile.offset < quantile.centroid.count - 1) {
 							++quantile.offset;
 						} else {	// move to the next centroid
 							const nextPath = this._centroids.next(this._centroids.find(quantile.centroid.value));
@@ -396,9 +427,9 @@ export class Sparstogram {
 		if (this._markers) {
 			for (let i = 0; i < this._markers.length; ++i) {
 				const quantile = this._markers[i]!;
-				if (quantile.centroid === priorEntry) {
+				if (quantile.centroid.value === priorEntry.value) {
 					quantile.centroid = newEntry;
-				} else if (quantile.centroid === minEntry) {
+				} else if (quantile.centroid.value === minEntry.value) {
 					quantile.offset += minEntry.count;
 					quantile.centroid = newEntry;
 				}
@@ -428,20 +459,29 @@ export class Sparstogram {
 				throw new Error("Either markerIndex or value must be specified as criteria");
 			}
 			return criteria.markerIndex !== undefined
-					? this._centroids.find(this.markerAt(criteria.markerIndex).centroid.value)
-					: this._centroids.find(criteria.value!);
+				? this._centroids.find(this.markerAt(criteria.markerIndex).centroid.value)
+				: this._centroids.find(criteria.value!);
 		}
 		return undefined;
 	}
 }
 
-/** Estimates combined variance if merged, considering the weighted mean */
-function combinedVariance(a: Centroid, b: Centroid) {
-	return ((a.variance * a.count) + (b.variance * b.count)) / (a.count + b.count)
-		+ (a.count * b.count * Math.pow(a.value - b.value, 2)) / Math.pow(a.count + b.count, 2);
+/** Returns the merged centroid, assuming a shared mean */
+function combineSharedMean(centroidA: Centroid, centroidB: Centroid) {
+	const count = centroidA.count + centroidB.count;
+	const variance = (centroidA.variance * (centroidA.count - 1) + centroidB.variance * (centroidB.count - 1))
+		/ (count - 1);	// Remove DOF
+	return { value: centroidA.value, count, variance };
 }
 
-// Calculate the Cumulative Distribution Function (CDF) for a normal distribution
+/** Estimates combined variance if merged, considering the weighted mean */
+function combinedVariance(a: Centroid, b: Centroid) {
+	// Assuming the direct combination of variances and mean difference
+	return ((a.variance * a.count) + (b.variance * b.count)) / (a.count + b.count - 1)
+				 + (a.count * b.count * Math.pow(a.value - b.value, 2)) / (a.count + b.count);
+}
+
+/** Calculates the Cumulative Distribution Function (CDF) for a normal distribution */
 function normalCDF(x: number, mean: number, variance: number): number {
 	const standardDeviation = Math.sqrt(variance);
 	return 0.5 * (1 + erf((x - mean) / (standardDeviation * Math.sqrt(2))));
@@ -449,13 +489,12 @@ function normalCDF(x: number, mean: number, variance: number): number {
 
 // Error function needed for the CDF calculation
 function erf(x: number): number {
-	// Constants
-	const a1 =  0.254829592;
+	const a1 = 0.254829592;
 	const a2 = -0.284496736;
-	const a3 =  1.421413741;
+	const a3 = 1.421413741;
 	const a4 = -1.453152027;
-	const a5 =  1.061405429;
-	const p  =  0.3275911;
+	const a5 = 1.061405429;
+	const p = 0.3275911;
 
 	// Save the sign of x
 	const sign = x < 0 ? -1 : 1;
@@ -471,29 +510,29 @@ function erf(x: number): number {
 /** Approximation of the CDF using Beasley-Springer-Moro algorithm - credit ChatGPT */
 function inverseNormalCDF(p: number): number {
 	const a1 = -3.969683028665376e+01;
-	const a2 =  2.209460984245205e+02;
+	const a2 = 2.209460984245205e+02;
 	const a3 = -2.759285104469687e+02;
-	const a4 =  1.383577518672690e+02;
+	const a4 = 1.383577518672690e+02;
 	const a5 = -3.066479806614716e+01;
-	const a6 =  2.506628277459239e+00;
+	const a6 = 2.506628277459239e+00;
 
 	const b1 = -5.447609879822406e+01;
-	const b2 =  1.615858368580409e+02;
+	const b2 = 1.615858368580409e+02;
 	const b3 = -1.556989798598866e+02;
-	const b4 =  6.680131188771972e+01;
+	const b4 = 6.680131188771972e+01;
 	const b5 = -1.328068155288572e+01;
 
 	const c1 = -7.784894002430293e-03;
 	const c2 = -3.223964580411365e-01;
 	const c3 = -2.400758277161838e+00;
 	const c4 = -2.549732539343734e+00;
-	const c5 =  4.374664141464968e+00;
-	const c6 =  2.938163982698783e+00;
+	const c5 = 4.374664141464968e+00;
+	const c6 = 2.938163982698783e+00;
 
-	const d1 =  7.784695709041462e-03;
-	const d2 =  3.224671290700398e-01;
-	const d3 =  2.445134137142996e+00;
-	const d4 =  3.754408661907416e+00;
+	const d1 = 7.784695709041462e-03;
+	const d2 = 3.224671290700398e-01;
+	const d3 = 2.445134137142996e+00;
+	const d4 = 3.754408661907416e+00;
 
 	// Define lower and upper fraction boundaries for rational approximations
 	const pLow = 0.02425;
@@ -501,47 +540,71 @@ function inverseNormalCDF(p: number): number {
 
 	// Rational approximation for lower region
 	if (0 < p && p < pLow) {
-			const q = Math.sqrt(-2 * Math.log(p));
-			return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-						 ((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
+		const q = Math.sqrt(-2 * Math.log(p));
+		return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
+			((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
 	}
 
 	// Rational approximation for central region
 	if (pLow <= p && p <= pHigh) {
-			const q = p - 0.5;
-			const r = q * q;
-			return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q /
-						 (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1);
+		const q = p - 0.5;
+		const r = q * q;
+		return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q /
+			(((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1);
 	}
 
 	// Rational approximation for upper region
 	if (pHigh < p && p < 1) {
-			const q = Math.sqrt(-2 * Math.log(1 - p));
-			return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-							((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
+		const q = Math.sqrt(-2 * Math.log(1 - p));
+		return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
+			((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
 	}
 
 	// If p is not in (0,1), return NaN as error state
 	return NaN;
 }
 
+// Non-linear interpolation of the value from the offset within the centroid
+// function inferValueFromOffset(offset: number, centroid: Centroid): number {
+// 	if (centroid.variance === 0) {
+// 			return centroid.value;
+// 	} else {
+// 			const standardDeviation = Math.sqrt(centroid.variance);
+
+// 			// Normalize and scale the offset to fall within the range of the distribution.
+// 			// This maps the offset to a percentile from 0 to 1, adjusting for distribution edges.
+// 			const percentile = (offset / (centroid.count - 1)) * 0.6826894921370859 + 0.15865525393145707;	// 1 sigma
+// 			// const percentile = (offset / (centroid.count - 1)) * 0.9544997361036416 + 0.022750131948179195;	// 2 sigma
+// 			// const percentile = (offset / (centroid.count - 1)) * 0.9973002039367398 + 0.0013498980316300933;	// 3 sigma
+
+// 			return centroid.value + standardDeviation * inverseNormalCDF(percentile);
+// 	}
+// }
+
+// Linear interpolation of the value over 1-sigma standard deviation breadth
 function inferValueFromOffset(offset: number, centroid: Centroid): number {
-	const standardDeviation = Math.sqrt(centroid.variance);
-	return centroid.value + standardDeviation * inverseNormalCDF(offset / centroid.count); // Assume mean 0 and variance 1 for the standard normal distribution
+	if (centroid.variance === 0) {
+			return centroid.value;
+	} else {
+			const standardDeviation = Math.sqrt(centroid.variance);
+			const fraction = offset / (centroid.count - 1); // Normalize offset to range [0, 1]
+			const scalar = -1 + 2 * fraction;	// 1 Sigma linear interpolation
+			return centroid.value + standardDeviation * scalar;
+	}
 }
 
 function interpolateCentroids(value: number, centroidA: Centroid, centroidB: Centroid): number {
-  // Calculate the CDF values for the value from both centroids
-  const cdfA = normalCDF(value, centroidA.value, centroidA.variance);
-  const cdfB = normalCDF(value, centroidB.value, centroidB.variance);
+	// Calculate the CDF values for the value from both centroids
+	const cdfA = normalCDF(value, centroidA.value, centroidA.variance);
+	const cdfB = normalCDF(value, centroidB.value, centroidB.variance);
 
-  // Assuming linear interpolation of CDF values based on counts
-  const totalCounts = centroidA.count + centroidB.count;
-  const weightA = centroidA.count / totalCounts;
-  const weightB = centroidB.count / totalCounts;
+	// Assuming linear interpolation of CDF values based on counts
+	const totalCounts = centroidA.count + centroidB.count;
+	const weightA = centroidA.count / totalCounts;
+	const weightB = centroidB.count / totalCounts;
 
-  // Weighted average of the CDF values to get the interpolated rank
-  return (cdfA * weightA) + (cdfB * weightB);
+	// Weighted average of the CDF values to get the interpolated rank
+	return (cdfA * weightA) + (cdfB * weightB);
 }
 
 /** Infer the rank within the given centroid pair given a value, assuming a normal distribution and with interpolation */
@@ -557,4 +620,26 @@ function inferRank(value: number, centroid: Centroid): number {
 /** Mean is a special case.  If variance is 0, treat the count as discretely accumulated at the mean point, otherwise the mean point splits the count */
 function rankAtMean(entry: CentroidEntry): number {
 	return entry.variance === 0 ? entry.count : Math.floor(entry.count / 2);
+}
+
+function calculateDensity(value: number, mean: number, variance: number): number {
+	if (variance === 0) {
+		return value === mean ? 1 : 0;
+	}
+	const standardDeviation = Math.sqrt(variance);
+	return (1 / (standardDeviation * Math.sqrt(2 * Math.PI))) *
+							Math.exp(-0.5 * Math.pow((value - mean) / standardDeviation, 2));
+}
+
+function interpolateCount(value: number, centroidA: Centroid, centroidB: Centroid): number {
+	// Calculate PDF values for the value from both centroids
+	const pdfA = calculateDensity(value, centroidA.value, centroidA.variance);
+	const pdfB = calculateDensity(value, centroidB.value, centroidB.variance);
+
+	// Take the maximum of the two densities as the interpolated count
+	return Math.round(Math.max(pdfA * centroidA.count, pdfB * centroidB.count));
+}
+
+function inferCount(value: number, centroid: Centroid): number {
+	return Math.round(calculateDensity(value, centroid.value, centroid.variance) * centroid.count);
 }
