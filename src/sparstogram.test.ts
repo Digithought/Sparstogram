@@ -40,6 +40,29 @@ describe('Sparstogram', () => {
       }
       expect(sparstogram.add(101)).toBeGreaterThan(0);
     });
+
+		test('should compress when maxCentroids is reduced', () => {
+			for (let i = 0; i < 5; i++) {
+				expect(sparstogram.add(i)).toBe(0);	// Assuming no loss for up to maxCentroids
+			}
+			sparstogram.maxCentroids = 1;
+			expect(sparstogram.centroidCount).toBe(1);
+			for (const centroid of sparstogram.ascending()) {
+				expect(centroid.value).toBe(2);	// Should be exactly the mean of the original values
+			}
+		});
+
+		test('should validate maxCentroids', () => {
+			expect(sparstogram.maxCentroids).toBe(10);
+			expect(() => sparstogram.maxCentroids = 0).toThrow();
+			expect(sparstogram.maxCentroids).toBe(10);
+		});
+
+		test('should validate appended centroids', () => {
+			expect(() => sparstogram.append({ value: 0, variance: 0, count: 0 })).toThrow();
+			expect(() => sparstogram.append({ value: 0, variance: -1, count: 1 })).toThrow();
+			expect(() => sparstogram.append({ value: 0, variance: 0, count: 1 })).not.toThrow();
+		});
   });
 
 });
@@ -181,6 +204,11 @@ describe('Sparstogram valueAt method', () => {
 });
 
 describe('atMarker method', () => {
+  test('should not allow invalid markers', () => {
+    expect(() => new Sparstogram(10, [-1])).toThrow();
+    expect(() => new Sparstogram(10, [1.1])).toThrow();
+  });
+
   test('should return undefined for empty histogram', () => {
     const sparstogram = new Sparstogram(10, [0.5]); // Median marker
     expect(() => sparstogram.markerAt(0)).toThrow();
@@ -526,4 +554,69 @@ describe('Sparstogram peaks method', () => {
   // - Testing with different smoothing parameters
   // - Testing with datasets that have flat peaks (plateaus)
   // - Testing with very large datasets to ensure performance and correctness
+});
+
+
+describe('Sparstogram Iterators', () => {
+  let sparstogram: Sparstogram;
+
+  beforeEach(() => {
+    sparstogram = new Sparstogram(10, undefined);
+    // Populate the sparstogram with a mixture of values
+    [10, 20, 5, 15, 25].forEach(value => sparstogram.add(value));
+  });
+
+  describe('ascending iterator', () => {
+    test('should iterate through centroids in ascending order', () => {
+      const values = Array.from(sparstogram.ascending()).map(c => c.value);
+      expect(values).toEqual([5, 10, 15, 20, 25]);
+    });
+
+    test('should not allow invalid criteria', () => {
+			expect(() => Array.from(sparstogram.ascending({})).map(c => c.value)).toThrow();	// neither
+			expect(() => Array.from(sparstogram.ascending({ value: 15, markerIndex: 0 })).map(c => c.value)).toThrow();	// both
+    });
+
+    test('should start at the specified value', () => {
+      const values = Array.from(sparstogram.ascending({ value: 15 })).map(c => c.value);
+      expect(values).toEqual([15, 20, 25]);
+    });
+
+		test('should start at markerIndex', () => {
+			sparstogram = new Sparstogram(10, [0.5]); // Median marker
+			[10, 20, 5, 15, 25].forEach(value => sparstogram.add(value));
+			const values = Array.from(sparstogram.ascending({ markerIndex: 0 })).map(c => c.value);
+			expect(values).toEqual([15, 20, 25]);
+		});
+
+    test('should handle empty histograms', () => {
+      sparstogram = new Sparstogram(10, undefined); // Reset to an empty histogram
+      const values = Array.from(sparstogram.ascending()).map(c => c.value);
+      expect(values).toHaveLength(0);
+    });
+
+    // Additional tests can include starting at the first centroid, at a nonexistent value (ensuring it starts at the next closest), etc.
+  });
+
+  describe('descending iterator', () => {
+    test('should iterate through centroids in descending order', () => {
+      const values = Array.from(sparstogram.descending()).map(c => c.value);
+      expect(values).toEqual([25, 20, 15, 10, 5]);
+    });
+
+    test('should start at the specified value', () => {
+      const values = Array.from(sparstogram.descending({ value: 15 })).map(c => c.value);
+      expect(values).toEqual([15, 10, 5]);
+    });
+
+    test('should handle empty histograms', () => {
+      sparstogram = new Sparstogram(10, undefined); // Reset to an empty histogram
+      const values = Array.from(sparstogram.descending()).map(c => c.value);
+      expect(values).toHaveLength(0);
+    });
+
+    // As with ascending, tests for starting at the last centroid, a nonexistent value, etc., are also valuable.
+  });
+
+  // Optionally, tests for criteria using markerIndex if your implementation supports and can demonstrate this functionality.
 });

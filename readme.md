@@ -42,6 +42,34 @@ Sparstogram is inspired by the paper "Approximate Frequency Counts over Data Str
 * Persisting the centroids ordered by their losses allows merging of centroids without scanning
 * Persisted markers allows for determination of quantiles without scanning
 
+### Traditional histogram
+
+In a typical representation of a histogram, values are evenly spaced.  Really, each value represents a range of values that are grouped.  For instance, if the values are 4ms, 5ms, and 6ms; in reality each bucket represents an interval (3.4ms-4.5ms, 4.5ms-5.5ms, ...).
+
+In computers, histograms are typically represented with an array, where every element represents the count in that range (or "entry").  There are a few noteworthy suppositions:
+* The range is explicitly defined beforehand
+* The resolution (breadth of each entry) is also explicitly defined beforehand
+* All entries are stored, regardless of whether they are used (non-zero)
+
+![typical histogram](doc/figures/hist.png)
+
+### Sparstogram
+
+In a Sparstogram, no entries are stored until they are added, and no range is maintained between entries (AKA centroids) holding unused space.  The same histogram information as above is represented in a Sparstogram as only the three ordered entries having counts:
+
+![sparstogram](doc/figures/spars.png)
+
+Unlike the traditional representation, the Sparstogram dynamically adapts itself in entries, resolution and range.  A limit can be imposed on a Sparstogram through `maxCentroids`.  Once that number of unique values has been reached, additional entries will results in compression so as not to exceed that many entries.  Compression involves merging two adjacent entries into one, with a new mean, combined count, and a computed variance.  The pair to merge are chosen based on least loss, which information is maintained in an internal index so as not to require searching for.  Here is an illustration of the same Sparstogram, were we to set `maxCentroids` to 2, thus asking it to shrink to only 2 entries:
+
+![sparstogram](doc/figures/spars-compressed.png)
+
+Note that no mean information is lost in the compression, only distribution information.  To reduce the amount of distribution information lost, a variance is computed to capture the notion that the entry has "spread" and is no longer a point.  The `countAt`, `meanAt`, and the other accessor methods will attempt to interpolate based on that variance, based on a normal distribution.  As a result, though the true distribution is lost in the compression, the general effect of there being multiple entries is preserved.
+
+### What do I do with this?
+
+Create an instance with a `maxCentroids` budget, and feed is some information.  Time spent per User Interface, financial data, pixel brightnesses, audio samples, whatever.  The result will the the frequency of each value, which you can use to make judgements from.  You can maintain the median over a streaming dataset, for instance, or compute the 75th percentile of something to discover outliers or eliminate noise.
+
+
 ## Installation
 
 To install the Sparstogram library, use the following command:
@@ -130,10 +158,12 @@ Contributions to the Digitree Sparstogram library are welcome! Here's how you ca
 
 - **Reporting Bugs:** Open an issue describing the bug and how to reproduce it.
 - **Suggesting Enhancements:** For new features or improvements, open an issue with a clear title and description.
-- **Pull Requests:** For direct contributions, please make your changes in a separate branch and submit a pull request with a clear list of what you've done.
+- **Pull Requests:** For direct contributions, please make your changes in a separate fork and submit a pull request with a clear list of what you've done.
 
 ### TODO:
 * kMeans computation - maybe even an option to maintain?  (See https://github.com/Digithought/Histogram for a C# implementation)
+* Allan Variance option - for sequence sensitive applications, AVAR will give superior results.
+* Maybe enable normal distribution based offset estimation?  ...Still trying to decide if this is useful.
 
 ### Environment
 
