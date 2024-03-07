@@ -121,28 +121,32 @@ export class Sparstogram {
 		return 0;	// No loss if new bucket is inserted
 	}
 
-	/** Adds a centroid to the histogram.
-	 * If you want to dynamically limit loss, monitor the returned loss and adjust maxCentroids accordingly.
-	 * @returns The loss incurred by compression, if any
+	/** Adds one or more centroids to the histogram.
+	 * Adds all centroids before compressing to incur the least loss.
+	 * If you want to reduce memory usage, or monitor loss, use an iterator with sequential calls to this rather than this method.
+	 * @returns The maximal loss incurred by compression, if any
 	 */
-	append(centroid: Centroid) {	// Not very DRY, but performance critical
-		if (centroid.count < 1) {
-			throw new Error("Centroid count must be at least 1");
+	append(...centroids: Centroid[]) {
+		for (const centroid of centroids) {
+			if (centroid.count < 1) {
+				throw new Error("Centroid count must be at least 1");
+			}
+			if (centroid.variance < 0) {
+				throw new Error("Centroid variance must be at least 0");
+			}
+			this._count += centroid.count;
+			this.insertOrIncrementBucket(centroid);
 		}
-		if (centroid.variance < 0) {
-			throw new Error("Centroid variance must be at least 0");
+		let loss = 0;
+		while (this._centroidCount > this._maxCentroids) {
+			loss = this.compressOneBucket();
 		}
-		this._count += centroid.count;
-		this.insertOrIncrementBucket(centroid);
-		if (this._centroidCount > this._maxCentroids) {
-			return this.compressOneBucket();
-		}
-		return 0;	// No loss if new bucket is inserted
+		return loss;
 	}
 
 	/** Merges all the centroids from another histogram into this one.
 	 * Adds all centroids before compressing to incur the least loss.
-	 * If you want to reduce memory usage, or monitor loss, use an iterator with append rather than this method.
+	 * If you want to reduce memory usage, or monitor loss, use an iterator with sequential calls to append rather than this method.
 	 */
 	mergeFrom(other: Sparstogram) {
 		this._count += other.count;
@@ -361,7 +365,7 @@ export class Sparstogram {
 						++marker.rank;
 					}
 					const newRank = Math.round(this.markers![i] * (this._count - 1)) + 1;	// Rank is 1 based
-					if (newRank > marker.rank) {
+					while (newRank > marker.rank) {
 						if (marker.offset < marker.centroid.count - 1) {
 							++marker.offset;
 						} else {	// move to the next centroid
@@ -372,7 +376,8 @@ export class Sparstogram {
 							}
 						}
 						++marker.rank;
-					} else if (newRank < marker.rank) {
+					}
+					while (newRank < marker.rank) {
 						if (marker.offset > 0) {
 							--marker.offset;
 						} else {	// move to the prior centroid
