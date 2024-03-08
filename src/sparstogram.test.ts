@@ -189,14 +189,40 @@ describe('Sparstogram valueAt method', () => {
     expect(lowerRankResult.rank).toBe(2);
   });
 
-	// Test atQuantile which uses atRank internally
+	test('should return correct value given rank from the end', () => {
+    // Add items with sparse values
+    [1, 100, 200].forEach(value => sparstogram.add(value));
+    // Test rank that should fall within the first value
+    const highRankResult = sparstogram.valueAt(-1);
+    expect(highRankResult.centroid.value).toBe(200);
+    expect(highRankResult.rank).toBe(3);	// Rank always come back from front
+		expect(highRankResult.offset).toBe(0);
+		expect(highRankResult.value).toBe(200);
+	});
+
 	test('should return correct value for quantile in a dense histogram', () => {
 		for (let i = 1; i <= 10; i++) {
 			sparstogram.add(i);
 		}
-		const quantileResult = sparstogram.quantileAt(0.5);
+		let quantileResult = sparstogram.quantileAt(0.2);
+		expect(quantileResult.centroid.value).toBe(2);
+		expect(quantileResult.rank).toBe(2);
+
+		quantileResult = sparstogram.quantileAt(0.8);
+		expect(quantileResult.centroid.value).toBe(8);
+		expect(quantileResult.rank).toBe(8);
+
+		quantileResult = sparstogram.quantileAt(0.5);
 		expect(quantileResult.centroid.value).toBe(5);
 		expect(quantileResult.rank).toBe(5);
+
+		quantileResult = sparstogram.quantileAt(2);		// Should be the same as 1
+		expect(quantileResult.centroid.value).toBe(10);
+		expect(quantileResult.rank).toBe(10);
+
+		quantileResult = sparstogram.quantileAt(-2);	// Should be the same as 0
+		expect(quantileResult.centroid.value).toBe(1);
+		expect(quantileResult.rank).toBe(1);
 	});
 
   // More tests could be added to handle edge cases, such as ranks outside the range of the histogram,
@@ -575,6 +601,7 @@ describe('Sparstogram Iterators', () => {
     test('should not allow invalid criteria', () => {
 			expect(() => Array.from(sparstogram.ascending({})).map(c => c.value)).toThrow();	// neither
 			expect(() => Array.from(sparstogram.ascending({ value: 15, markerIndex: 0 })).map(c => c.value)).toThrow();	// both
+			expect(() => Array.from(sparstogram.ascending({ markerIndex: 0, quantile: sparstogram.valueAt(1) })).map(c => c.value)).toThrow();	// both
     });
 
     test('should start at the specified value', () => {
@@ -587,6 +614,13 @@ describe('Sparstogram Iterators', () => {
 			[10, 20, 5, 15, 25].forEach(value => sparstogram.add(value));
 			const values = Array.from(sparstogram.ascending({ markerIndex: 0 })).map(c => c.value);
 			expect(values).toEqual([15, 20, 25]);
+		});
+
+		test('should start at quantile', () => {
+			sparstogram = new Sparstogram(10, [0.5]); // Median marker
+			[10, 20, 5, 15, 25].forEach(value => sparstogram.add(value));
+			const values = Array.from(sparstogram.ascending({ quantile: sparstogram.valueAt(4) })).map(c => c.value);
+			expect(values).toEqual([20, 25]);
 		});
 
     test('should handle empty histograms', () => {

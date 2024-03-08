@@ -40,6 +40,16 @@ interface Quantile extends Marker {
 	value: number;
 }
 
+/** Criteria for navigating in the histogram */
+export interface Criteria {
+	/** The marker index to start at (0 = median, 1 = lower quartile, 2 = upper quartile, etc.) */
+	markerIndex?: number;
+	/** The value to start at */
+	value?: number;
+	/** The quantile to start at */
+	quantile?: Quantile;
+}
+
 /** A histogram that maintains a complete or sparse approximation of the data frequency.
  * The representation will be complete if the number of distinct values is less than or equal to the maxCentroids.
  * Otherwise, the values will be compressed to a smaller number of centroids in a way that minimizes the loss.
@@ -193,15 +203,24 @@ export class Sparstogram {
 	}
 
 	/** Returns the centroid at a given rank in the histogram (count / 2 = median)
-	 * @param rank The rank (accumulated count from start) to find the value for
-	 * @returns The Quantile information at the given rank in the histogram
+	 * @param rank The rank (accumulated count from start if positive, end if negative) to find the value for
+	 * @returns The Quantile information at the given rank in the histogram - always returns a positive rank
 	 */
 	valueAt(rank: number): Quantile {
-		let remainingRank = rank;
-		for (const path of this._centroids.ascending(this._centroids.first())) {
+		let remainingRank = Math.abs(rank);
+		for (const path of rank >= 0
+			? this._centroids.ascending(this._centroids.first())
+			: this._centroids.descending(this._centroids.last())) {
 			const entry = this._centroids.at(path)!;
 			if (remainingRank <= entry.count) {
-				return { rank, centroid: entry, offset: remainingRank - 1, value: inferValueFromOffset(remainingRank - 1, entry) };
+				const positiveRank = rank >= 0 ? rank : (this._count + rank + 1);
+				const offset = rank >= 0 ? remainingRank - 1 : (entry.count - remainingRank);
+				return {
+					rank: positiveRank,
+					centroid: entry,
+					offset,
+					value: inferValueFromOffset(offset, entry)
+				};
 			}
 			remainingRank -= entry.count;
 		}
@@ -238,8 +257,9 @@ export class Sparstogram {
 	 * @returns The centroid at the given quantile in the histogram
 	 */
 	quantileAt(quantile: number): Quantile {
-		const rank = Math.round(quantile * this._count);
-		return this.valueAt(rank);
+		const rank = Math.min(this._count, Math.max(1, Math.round(quantile * this._count)));
+		const pos = (quantile <= 0.5 ? rank : -(this._count - rank + 1)) // Search from the closest end
+		return this.valueAt(pos);
 	}
 
 	/** Returns the quantile marker at a given index, as given by markers at construction (0 = median, 1 = lower quartile, 2 = upper quartile, etc.)
@@ -304,7 +324,7 @@ export class Sparstogram {
 	/** Returns an iterator for the centroids in the histogram in ascending order
 	 * @param criteria If specified, the iterator will start at the centroid at the given marker index or value; otherwise it will start at the first centroid
 	 */
-	*ascending(criteria?: { markerIndex?: number, value?: number }): IterableIterator<Centroid> {
+	*ascending(criteria?: Criteria): IterableIterator<Centroid> {
 		const startPath = this.criteriaToPath(criteria) ?? this._centroids.first();
 		for (const path of this._centroids.ascending(startPath)) {
 			yield this._centroids.at(path)!;
@@ -314,7 +334,7 @@ export class Sparstogram {
 	/** Returns an iterator for the centroids in the histogram in descending order
 	 * @param criteria If specified, the iterator will start at the centroid at the given marker index or value; otherwise it will start at the last centroid
 	 */
-	*descending(criteria?: { markerIndex?: number, value?: number }): IterableIterator<Centroid> {
+	*descending(criteria?: Criteria): IterableIterator<Centroid> {
 		const startPath = this.criteriaToPath(criteria) ?? this._centroids.last();
 		for (const path of this._centroids.descending(startPath)) {
 			yield this._centroids.at(path)!;
@@ -454,16 +474,16 @@ export class Sparstogram {
 		return minEntry.loss;
 	}
 
-	private criteriaToPath(criteria?: { markerIndex?: number, value?: number }): Path<number, CentroidEntry> | undefined {
+	private criteriaToPath(criteria?: Criteria): Path<number, CentroidEntry> | undefined {
 		if (criteria) {
-			if (criteria.markerIndex !== undefined && criteria.value !== undefined) {
-				throw new Error("Only one of markerIndex or value can be specified as criteria");
+			if (criteria.markerIndex !== undefined && criteria.value !== undefined && criteria.quantile) {
+				throw new Error("Only one of markerIndex, value, or quantile can be specified as criteria");
 			}
-			if (criteria.markerIndex === undefined && criteria.value === undefined) {
-				throw new Error("Either markerIndex or value must be specified as criteria");
+			if (criteria.markerIndex === undefined && criteria.value === undefined && criteria.quantile === undefined) {
+				throw new Error("Either markerIndex, value, or quantile must be specified as criteria");
 			}
-			return criteria.markerIndex !== undefined
-				? this._centroids.find(this.markerAt(criteria.markerIndex).centroid.value)
+			return criteria.markerIndex !== undefined ? this._centroids.find(this.markerAt(criteria.markerIndex).centroid.value)
+				: criteria.quantile ? this._centroids.find(criteria.quantile.centroid.value)
 				: this._centroids.find(criteria.value!);
 		}
 		return undefined;
