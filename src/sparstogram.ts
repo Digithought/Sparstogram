@@ -60,11 +60,11 @@ export interface Criteria {
  */
 export class Sparstogram {
 	/** The centroids ordered by value */
-	private _centroids = new BTree<number, CentroidEntry>(e => e.value);
+	private _centroids = new BTree<number, CentroidEntry>(e => e.value, (a, b) => a - b);
 	private _centroidCount = 0;
 	private _count = 0;
 	/** Centroids ordered by loss between the centroid and prior (in value order).  Ordered by (loss ascending, value) */
-	private _losses = new BTree<Loss, Loss>(e => e, (a, b) => a.loss < b.loss ? -1 : a.loss > b.loss ? 1 : (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
+	private _losses = new BTree<Loss, Loss>(e => e, (a, b) => a.loss === b.loss ? a.value - b.value : a.loss - b.loss);
 	private _maxCentroids!: number;
 	private _markers: (Marker | undefined)[] | undefined;
 
