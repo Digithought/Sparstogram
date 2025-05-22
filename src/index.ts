@@ -1,1 +1,1 @@
-export * from "./sparstogram";
+export * from "./sparstogram.js";

@@ -454,7 +454,7 @@ export class Sparstogram {
 				if (marker.centroid.value === priorEntry.value) {
 					marker.centroid = newEntry;
 				} else if (marker.centroid.value === minEntry.value) {
-					marker.offset += minEntry.count;
+					marker.offset += priorEntry.count;
 					marker.centroid = newEntry;
 				}
 			}
@@ -499,10 +499,29 @@ function combineSharedMean(centroidA: Centroid, centroidB: Centroid) {
 }
 
 /** Estimates combined variance if merged, considering the weighted mean */
-function combinedVariance(a: Centroid, b: Centroid) {
-	// Assuming the direct combination of variances and mean difference
-	return ((a.variance * a.count) + (b.variance * b.count)) / (a.count + b.count - 1)
-				 + (a.count * b.count * Math.pow(a.value - b.value, 2)) / (a.count + b.count);
+function combinedVariance(a: Centroid, b: Centroid): number {
+	const nA = a.count;
+	const nB = b.count;
+	const totalN = nA + nB;
+
+	if (totalN <= 1) {
+		return 0; // Variance is undefined or 0 for a single point or no points
+	}
+
+	// Sum of squares for centroid A. Initial centroids (count=1) have variance=0, so ssA will be 0.
+	const ssA = nA > 0 ? a.variance * (nA > 1 ? nA - 1 : 0) : 0;
+	// Sum of squares for centroid B.
+	const ssB = nB > 0 ? b.variance * (nB > 1 ? nB - 1 : 0) : 0;
+
+	// This check avoids division by zero if totalN is 0, though nA, nB should be >= 1 from context of use.
+	const ssBetween = (nA === 0 || nB === 0 || totalN === 0)
+		? 0
+		: (nA * nB * Math.pow(a.value - b.value, 2)) / totalN;
+
+	const totalDF = totalN - 1;
+
+	// Avoid division by zero if totalDF is 0 (e.g. totalN=1 implies totalDF=0)
+	return totalDF > 0 ? (ssA + ssB + ssBetween) / totalDF : 0;
 }
 
 /** Calculates the Cumulative Distribution Function (CDF) for a normal distribution */
@@ -607,7 +626,7 @@ function erf(x: number): number {
 
 // Linear interpolation of the value over 1-sigma standard deviation breadth
 function inferValueFromOffset(offset: number, centroid: Centroid): number {
-	if (centroid.variance === 0) {
+	if (centroid.variance === 0 || centroid.count === 1) {
 			return centroid.value;
 	} else {
 			const standardDeviation = Math.sqrt(centroid.variance);
