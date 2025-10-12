@@ -1,6 +1,6 @@
 {
   "name": "sparstogram",
-  "version": "0.9.0",
+  "version": "0.9.5",
   "description": "Sparse, adaptive, scalable histogram in TypeScript",
   "type": "module",
   "main": "./dist/index.js",
@@ -9,11 +9,11 @@
     ".": "./dist/index.js"
   },
   "scripts": {
-    "clean": "rm -rf dist/",
+    "clean": "rimraf dist",
     "doc": "npx typedoc -out docs src",
     "build": "npm run clean && tsc -p tsconfig.build.json",
-    "test": "node --loader=ts-node/esm node_modules/mocha/bin/mocha.js src/**/*.test.ts --colors",
-    "prepublish": "npm run build && npm run doc"
+    "test": "node --loader=ts-node/esm node_modules/mocha/bin/mocha.js src/**/*.test.ts --colors --bail",
+    "prepublishOnly": "npm run build && npm run doc"
   },
   "repository": {
     "type": "git",
@@ -42,6 +42,7 @@
     "chai": "^5.2.0",
     "eslint": "^9.27.0",
     "mocha": "^11.4.0",
+    "rimraf": "^6.0.1",
     "ts-node": "^10.9.2",
     "typedoc": "^0.28.4",
     "typescript": "^5.8.3"

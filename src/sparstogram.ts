@@ -8,7 +8,11 @@ export interface Centroid {
 }
 
 interface CentroidEntry extends Centroid {
-	loss: number;	// Loss between this centroid and the prior centroid (infinity for the first centroid)
+	// "loss" remains the *base* pair loss to the prior centroid.  The priority
+	// queue (_losses) may rank pairs by a *curvature‑aware score* that uses this
+	// base loss divided by a local CDF curvature proxy.  See comments near
+	// getPriorScore/updateNextScore.
+	loss: number; // base loss to prior (Infinity for first)
 }
 
 interface Loss {
@@ -60,13 +64,24 @@ export interface Criteria {
  */
 export class Sparstogram {
 	/** The centroids ordered by value */
-	private _centroids = new BTree<number, CentroidEntry>(e => e.value, (a, b) => a - b);
+	private _centroids = new BTree<number, CentroidEntry>((e: CentroidEntry) => e.value, (a: number, b: number) => a - b);
 	private _centroidCount = 0;
 	private _count = 0;
 	/** Centroids ordered by loss between the centroid and prior (in value order).  Ordered by (loss ascending, value) */
-	private _losses = new BTree<Loss, Loss>(e => e, (a, b) => a.loss === b.loss ? a.value - b.value : a.loss - b.loss);
+	// Pairs ordered by *score* (not necessarily the raw base loss).  The score is
+	// a curvature‑aware adjustment that prefers keeping mass where the empirical
+	// CDF bends (peaks/tails).  Inspired by k‑point discrete approximations such
+	// as DAUD (data‑aware uniform discretization) and W1‑oriented quantizers used
+	// for stable sketch arithmetic.
+	// References (context/inspiration):
+	// 	- "k‑point discrete approximations minimizing KL / W1" (DAUD‑style)
+	// 	- Divide‑and‑Conquer quantization with W1 error guarantees (merge‑stable)
+	private _losses = new BTree<Loss, Loss>((e: Loss) => e, (a: Loss, b: Loss) => a.loss === b.loss ? a.value - b.value : a.loss - b.loss);
 	private _maxCentroids!: number;
 	private _markers: (Marker | undefined)[] | undefined;
+
+	// Cheap global‑error proxy; correlates with W1 drift: sum_i min(w_i,w_{i+1})*|Δx_i|
+	private _tightnessJ = 0;
 
 	constructor(
 		/** The initial maximum number of centroids to store.
@@ -111,6 +126,18 @@ export class Sparstogram {
 	get count() {
 		return this._count;
 	}
+
+	/**
+	 * Cheap global tightness metric for the current discretization.
+	 * - Proxy for 1‑Wasserstein (Earth Mover's) drift; maintained incrementally.
+	 * - Roughly the sum over adjacent centroids of min(count_i, count_{i+1}) * |x_{i+1} - x_i|.
+	 * - Units: count × value‑units; non‑negative; 0 only when all mass is at one value.
+	 * - Directionality: lower = tighter/less spread; higher = looser/more separation between neighbors.
+	 * - Caveats: heuristic/approximate (not exact W1), unnormalized and scale/total‑count dependent—best for
+	 *   relative monitoring within the same dataset/scale (e.g., tracking compression drift), not as an
+	 *   absolute error bound.
+	 */
+	get tightnessJ() { return this._tightnessJ; }
 
 	/** The current number of distinct values (centroids) in the histogram.
 	 * This may be fewer than the number of distinct values added if `maxCentroids` is less than the number of distinct values added. */
@@ -163,8 +190,11 @@ export class Sparstogram {
 		for (const centroid of other.ascending()) {
 			this.insertOrIncrementBucket(centroid);
 		}
+		const batchSize = Math.max(1, Math.ceil(this._maxCentroids / 4));
 		while (this._centroidCount > this._maxCentroids) {
-			this.compressOneBucket();
+			for (let i = 0; i < batchSize && this._centroidCount > this._maxCentroids; ++i) {
+				this.compressOneBucket();
+			}
 		}
 	}
 
@@ -341,8 +371,8 @@ export class Sparstogram {
 		}
 	}
 
-	/** Computes the loss between two centroids
-	 * This is the sum of the weighted distance between the centroids and the combined variance of the centroids
+	/** Base *pair* loss between two centroids.
+	 * Kept independent of ranking heuristics; ordering may use curvature‑aware scores.
 	 */
 	private computeLoss(a: Centroid, b: Centroid): number {
 		// Weighted mean distance between centroids
@@ -353,21 +383,95 @@ export class Sparstogram {
 		return weightedDistance + combinedVariance(a, b);
 	}
 
+	// ----- Curvature‑aware local scoring -------------------------------------
+	// We approximate a local CDF curvature near the seam (prior, current) using
+	// density differences on the left and right: |dens(l,prior) - dens(prior,curr)|
+	// and |dens(prior,curr) - dens(curr,r)|.  The score used in _losses is:
+	//   score = baseLoss / (eps + 0.5*(leftCurv + rightCurv))
+	// This cheaply preserves bends (peaks/tails) while keeping operations local.
+	private getPriorScore(path: Path<number, CentroidEntry>, newCentroid: Centroid): number {
+		const prior = this._centroids.prior(path);
+		if (!prior.on) return Infinity;
+		const a = this._centroids.at(prior)!; // prior
+		const b = newCentroid; // current
+		const base = this.computeLoss(a, b);
+		const lpath = this._centroids.prior(prior);
+		const rpath = this._centroids.next(path);
+		const l = lpath.on ? this._centroids.at(lpath)! : undefined;
+		const r = rpath.on ? this._centroids.at(rpath)! : undefined;
+		const curv = this.localCurvature(l, a, b, r);
+		return base / (1e-9 + curv);
+	}
+
+	private updateNextScore(path: Path<number, CentroidEntry>, newCentroid: Centroid): number {
+		const next = this._centroids.next(path);
+		if (!next.on) return Infinity;
+		const a = newCentroid; // prior in pair
+		const b = this._centroids.at(next)!; // current in pair
+		const base = this.computeLoss(a, b);
+		const lpath = this._centroids.prior(path);
+		const rpath = this._centroids.next(next);
+		const l = lpath.on ? this._centroids.at(lpath)! : undefined;
+		const r = rpath.on ? this._centroids.at(rpath)! : undefined;
+		const curv = this.localCurvature(l, a, b, r);
+		return base / (1e-9 + curv);
+	}
+
+	private localCurvature(l: Centroid | undefined, a: Centroid, b: Centroid, r: Centroid | undefined): number {
+		const dens = (u: Centroid, v: Centroid) => (u.count + v.count) / (Math.abs(v.value - u.value) + 1e-12);
+		const left = l ? Math.abs(dens(l, a) - dens(a, b)) : dens(a, b);
+		const right = r ? Math.abs(dens(a, b) - dens(b, r)) : dens(a, b);
+		return 0.5 * (left + right);
+	}
+
+	// Signature to allow binding via prototype to helper below
+	private edgeContribution(u: Centroid, v: Centroid): number { return edgeContribution(u, v); }
+
 	/** Inserts a new value into the histogram or increments the count of the existing bucket */
 	private insertOrIncrementBucket(centroid: Centroid) {
 		const path = this._centroids.find(centroid.value);
 		if (path.on) {
 			const entry = this._centroids.at(path)!;
+			// Get all neighbor information before any tree mutations
+			const priorPath = this._centroids.prior(path);
+			const nextPath = this._centroids.next(path);
+			const priorCentroid = priorPath.on ? this._centroids.at(priorPath)! : undefined;
+			const nextCentroid = nextPath.on ? this._centroids.at(nextPath)! : undefined;
+
+			const beforeL = priorCentroid ? this.edgeContribution(priorCentroid, entry) : 0;
+			const afterR = nextCentroid ? this.edgeContribution(entry, nextCentroid) : 0;
+
 			const newCentroid = combineSharedMean(entry, centroid);
-			const newLoss = this.getPriorLoss(path, newCentroid);
-			this._centroids.updateAt(path, { ...newCentroid, loss: newLoss });
-			this._losses.updateAt(this._losses.find(entry), { loss: newLoss, value: entry.value });
+			const baseLoss = this.getPriorLoss(path, newCentroid);
+			const priorScore = this.getPriorScore(path, newCentroid);
+			this._centroids.updateAt(path, { ...newCentroid, loss: baseLoss });
+			this._losses.updateAt(this._losses.find(entry), { loss: priorScore, value: entry.value });
 			this.updateNext(path, newCentroid);
+
+			// update J locally
+			const afterL2 = priorCentroid ? this.edgeContribution(priorCentroid, newCentroid) : 0;
+			const afterR2 = nextCentroid ? this.edgeContribution(newCentroid, nextCentroid) : 0;
+			this._tightnessJ += -beforeL - afterR + afterL2 + afterR2;
 		} else {
 			++this._centroidCount;
+			const prior = this._centroids.prior(path);
+			const next = this._centroids.next(path);
+			// Get the actual centroids before inserting (paths will be invalid after)
+			const priorCentroid = prior.on ? this._centroids.at(prior)! : undefined;
+			const nextCentroid = next.on ? this._centroids.at(next)! : undefined;
 			const loss = this.getPriorLoss(path, centroid);
 			const newPath = this._centroids.insert({ ...centroid, loss });
-			this._losses.insert({ loss, value: centroid.value });
+			this._losses.insert({ loss: this.getPriorScore(newPath, centroid), value: centroid.value });
+			// update J locally for edge splits
+			if (priorCentroid && nextCentroid) {
+				this._tightnessJ -= this.edgeContribution(priorCentroid, nextCentroid);
+				this._tightnessJ += this.edgeContribution(priorCentroid, centroid);
+				this._tightnessJ += this.edgeContribution(centroid, nextCentroid);
+			} else if (priorCentroid) {
+				this._tightnessJ += this.edgeContribution(priorCentroid, centroid);
+			} else if (nextCentroid) {
+				this._tightnessJ += this.edgeContribution(centroid, nextCentroid);
+			}
 			this.updateNext(newPath, centroid);
 			this.updateMarkers(centroid.value);
 		}
@@ -424,54 +528,96 @@ export class Sparstogram {
 		if (next.on) {
 			const nextEntry = this._centroids.at(next)!;
 			const newLoss = this.computeLoss(newCentroid, nextEntry);
+			const newScore = this.updateNextScore(path, newCentroid);
 			this._centroids.updateAt(next, { ...nextEntry, loss: newLoss });
-			this._losses.updateAt(this._losses.find(nextEntry), { loss: newLoss, value: nextEntry.value });
+			this._losses.updateAt(this._losses.find(nextEntry), { loss: newScore, value: nextEntry.value });
 		}
 	}
 
-	/** Compresses the two buckets with the smallest loss into one bucket */
+	/** Compresses the two buckets with the smallest *score* into one bucket */
 	private compressOneBucket(): number {
 		const minLossPath = this._losses.first();
 		const minLossEntry = this._losses.at(minLossPath)!;
 		const minPath = this._centroids.find(minLossEntry.value);
+		if (!minPath.on) {
+			// Selected loss refers to a centroid that no longer exists. Drop and retry.
+			this._losses.deleteAt(minLossPath);
+			const nextLoss = this._losses.first();
+			if (!nextLoss.on) {
+				throw new Error("No compressible centroid pair available – loss index corrupt");
+			}
+			return this.compressOneBucket();
+		}
 		const minEntry = this._centroids.at(minPath)!;
 		const priorPath = this._centroids.prior(minPath);	// This should be there because the first entry should have infinite loss and never be selected
+		if (!priorPath.on) {
+			// Stale loss entry that points at the first centroid (no prior). Drop and retry.
+			this._losses.deleteAt(minLossPath);
+			const nextLoss = this._losses.first();
+			if (!nextLoss.on) {
+				throw new Error("No compressible centroid pair available – loss index corrupt");
+			}
+			return this.compressOneBucket();
+		}
 		const priorEntry = this._centroids.at(priorPath)!;
-		const priorPriorEntry = this._centroids.at(this._centroids.prior(priorPath))!;	// New prior entry after the merge
+		if (!priorEntry) {
+			// Defensive: if prior entry vanished due to concurrent manipulation, remove loss entry and retry.
+			this._losses.deleteAt(minLossPath);
+			const nextLoss = this._losses.first();
+			if (!nextLoss.on) {
+				throw new Error("No compressible centroid pair available – loss index corrupt");
+			}
+			return this.compressOneBucket();
+		}
+		const priorPriorPath = this._centroids.prior(priorPath);
+		const priorPriorEntry = priorPriorPath.on ? this._centroids.at(priorPriorPath)! : undefined;
+		const nextPath = this._centroids.next(minPath);
+		const nextEntry = nextPath.on ? this._centroids.at(nextPath)! : undefined;
 
-		const newCentroid = {
-			value: (priorEntry.value * priorEntry.count + minEntry.value * minEntry.count) / (priorEntry.count + minEntry.count),
-			count: priorEntry.count + minEntry.count,
-			variance: combinedVariance(priorEntry, minEntry)
-		};
+		// Micro‑recentering: place merged centroid at the weighted median of the pair
+		const newCount = priorEntry.count + minEntry.count;
+		const newVariance = combinedVariance(priorEntry, minEntry);
+		const xWeightedMedian = (priorEntry.count >= minEntry.count) ? priorEntry.value : minEntry.value;
+		const newCentroid = { value: xWeightedMedian, count: newCount, variance: newVariance };
 		const loss = priorPriorEntry ? this.computeLoss(priorPriorEntry, newCentroid) : Infinity;
 		const newEntry = { ...newCentroid, loss };
 
 		// Update markers
 		if (this._markers) {
 			for (let i = 0; i < this._markers.length; ++i) {
-				const marker = this._markers[i]!;
-				if (marker.centroid.value === priorEntry.value) {
-					marker.centroid = newEntry;
-				} else if (marker.centroid.value === minEntry.value) {
-					marker.offset += priorEntry.count;
-					marker.centroid = newEntry;
+				const marker = this._markers[i];
+				if (marker && marker.centroid) {
+					if (marker.centroid.value === priorEntry.value) {
+						marker.centroid = newEntry;
+					} else if (marker.centroid.value === minEntry.value) {
+						marker.offset += priorEntry.count;
+						marker.centroid = newEntry;
+					}
 				}
 			}
 		}
 
 		// Remove the old buckets and insert the merged one
+		// Update tightness J locally for edges affected: (priorPrior,prior), (prior,min), (min,next)
+		if (priorPriorEntry) this._tightnessJ -= this.edgeContribution(priorPriorEntry, priorEntry);
+		this._tightnessJ -= this.edgeContribution(priorEntry, minEntry);
+		if (nextEntry) this._tightnessJ -= this.edgeContribution(minEntry, nextEntry);
+
 		this._centroids.deleteAt(priorPath);
 		this._centroids.deleteAt(this._centroids.find(minEntry.value)!);
 		const newPath = this._centroids.insert(newEntry);
 		this._losses.deleteAt(minLossPath);
 		this._losses.deleteAt(this._losses.find(priorEntry)!);
-		this._losses.insert({ loss, value: newEntry.value });
+		this._losses.insert({ loss: this.getPriorScore(newPath, newCentroid), value: newEntry.value });
 		this.updateNext(newPath, newCentroid);
+
+		// Add new edge contributions
+		if (priorPriorEntry) this._tightnessJ += this.edgeContribution(priorPriorEntry, newCentroid);
+		if (nextEntry) this._tightnessJ += this.edgeContribution(newCentroid, nextEntry);
 
 		this._centroidCount--; // Reflect the merge in the bucket count
 
-		return minEntry.loss;
+		return minEntry.loss; // return *base* loss for API compatibility
 	}
 
 	private criteriaToPath(criteria?: Criteria): Path<number, CentroidEntry> | undefined {
@@ -484,7 +630,7 @@ export class Sparstogram {
 			}
 			return criteria.markerIndex !== undefined ? this._centroids.find(this.markerAt(criteria.markerIndex).centroid.value)
 				: criteria.quantile ? this._centroids.find(criteria.quantile.centroid.value)
-				: this._centroids.find(criteria.value!);
+					: this._centroids.find(criteria.value!);
 		}
 		return undefined;
 	}
@@ -524,6 +670,21 @@ function combinedVariance(a: Centroid, b: Centroid): number {
 	return totalDF > 0 ? (ssA + ssB + ssBetween) / totalDF : 0;
 }
 
+// ---- Helpers for local metrics ------------------------------------------------
+function min2(a: number, b: number) { return a < b ? a : b; }
+
+/** Computes the edge contribution to the tightness metric for a pair of centroids.
+ * Returns min(u.count, v.count) * |v.value - u.value|
+ * @param u First centroid
+ * @param v Second centroid
+ * @returns Edge contribution value
+ */
+export function edgeContribution(u: Centroid, v: Centroid): number {
+	return min2(u.count, v.count) * Math.abs(v.value - u.value);
+}
+
+// Bind the class method to this helper to avoid code drift.
+(Sparstogram.prototype as any).edgeContribution = edgeContribution;
 /** Calculates the Cumulative Distribution Function (CDF) for a normal distribution */
 function normalCDF(x: number, mean: number, variance: number): number {
 	const standardDeviation = Math.sqrt(variance);
@@ -627,12 +788,12 @@ function erf(x: number): number {
 // Linear interpolation of the value over 1-sigma standard deviation breadth
 function inferValueFromOffset(offset: number, centroid: Centroid): number {
 	if (centroid.variance === 0 || centroid.count === 1) {
-			return centroid.value;
+		return centroid.value;
 	} else {
-			const standardDeviation = Math.sqrt(centroid.variance);
-			const fraction = offset / (centroid.count - 1); // Normalize offset to range [0, 1]
-			const scalar = -1 + 2 * fraction;	// 1 Sigma linear interpolation
-			return centroid.value + standardDeviation * scalar;
+		const standardDeviation = Math.sqrt(centroid.variance);
+		const fraction = offset / (centroid.count - 1); // Normalize offset to range [0, 1]
+		const scalar = -1 + 2 * fraction;	// 1 Sigma linear interpolation
+		return centroid.value + standardDeviation * scalar;
 	}
 }
 
@@ -671,7 +832,7 @@ function calculateDensity(value: number, mean: number, variance: number): number
 	}
 	const standardDeviation = Math.sqrt(variance);
 	return (1 / (standardDeviation * Math.sqrt(2 * Math.PI))) *
-							Math.exp(-0.5 * Math.pow((value - mean) / standardDeviation, 2));
+		Math.exp(-0.5 * Math.pow((value - mean) / standardDeviation, 2));
 }
 
 function interpolateCount(value: number, centroidA: Centroid, centroidB: Centroid): number {
