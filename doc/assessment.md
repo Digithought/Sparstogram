@@ -360,18 +360,22 @@ When any code path calls `_losses.find(centroidEntry)`, it uses `centroidEntry.l
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 12.1 | Monolithic 850-line class | | Single responsibility concern: compression, querying, markers, iteration all in one class; manageable at current size but approaching threshold |
-| 12.2 | Commented-out code | | :714-786 — large block of commented-out `inverseNormalCDF` and alternative `inferValueFromOffset`; should be removed or documented as intentional |
-| 12.3 | `min2()` helper | | :674 — reimplements `Math.min` for 2 args; micro-optimization; unclear if measurable benefit |
-| 12.4 | Prototype binding pattern | | :687 — `(Sparstogram.prototype as any).edgeContribution = edgeContribution`; unusual; private method + module function dual — fragile |
-| 12.5 | Magic numbers | | `1e-9` (:403), `1e-12` (:421), `0.5` weighting (:424); should be named constants |
-| 12.6 | Error handling inconsistency | | Some methods throw (valueAt, markerAt), others return 0 (rankAt on empty, countAt on empty); not consistent |
-| 12.7 | `peaks()` TODO comment | | :317 — ring buffer optimization noted but not implemented |
-| 12.8 | ESLint configuration | | `eslint.config.js` likely present; verify rules are meaningful and enforced |
-| 12.9 | `result` variable in `peaks()` | | :319 — declared but never used (peaks are yielded directly); dead code |
-| 12.10 | `let` vs `const` in `peaks()` | | :317-318 — `left` and `right` declared with `let` but never reassigned; should be `const` |
+| 12.1 | Monolithic 850-line class | done | ~637 lines for the class + ~213 lines of module-level helpers = ~850 total. Responsibilities (insertion, compression, querying, iteration, markers) are cohesive — all share the same B+Tree state. Decomposing now would add coupling complexity without clear benefit. **Verdict: not warranted at current size.** Revisit if the class grows past ~1000 lines or gains a new major concern (e.g., serialization). |
+| 12.2 | Commented-out code | **fix recommended** | :714-786 — 73 lines of `inverseNormalCDF` and non-linear `inferValueFromOffset`. Dead code preserved in git history; no rationale comment explaining why it's kept. The active `inferValueFromOffset` at :789 supersedes it. Should be removed. Fix ticket: `fix/2-code-quality-cleanup.md` |
+| 12.3 | `min2()` helper | **fix recommended** | :674 — `function min2(a, b) { return a < b ? a : b; }` used only in `edgeContribution()` at :683. Intended as a micro-optimization over `Math.min`, but V8 inlines `Math.min` for two numeric args. No measurable benefit; harms readability. Replace with `Math.min`. Fix ticket: `fix/2-code-quality-cleanup.md` |
+| 12.4 | Prototype binding pattern | **fix recommended** | :687 — `(Sparstogram.prototype as any).edgeContribution = edgeContribution`. The class already has `private edgeContribution()` at :428 that delegates to the module function. The prototype override is redundant and prevents tree-shaking. The private method wrapper at :428 is sufficient — remove the prototype binding. Fix ticket: `fix/2-code-quality-cleanup.md` |
+| 12.5 | Magic numbers | **fix recommended** | Three numeric constants lack names: `1e-9` (score epsilon, :403/:417), `1e-12` (density epsilon, :421), `0.5` (curvature averaging weight, :424). The `0.5` is a simple average and arguably self-documenting; the epsilons are not. Propose named constants: `SCORE_EPSILON = 1e-9`, `DENSITY_EPSILON = 1e-12`. Fix ticket: `fix/2-code-quality-cleanup.md` |
+| 12.6 | Error handling inconsistency | done | Pattern: methods that can meaningfully return a default on empty data (`rankAt` → 0, `countAt` → 0) do so; methods that require data to produce a valid result (`valueAt`, `markerAt`) throw. This is a **deliberate design choice** — documented in R4 (4.12). `peaks()` yields nothing on insufficient data. The split is consistent within its logic. **No fix needed.** |
+| 12.7 | `peaks()` TODO comment | done | :317 — "TODO: replace these with ring buffers". `Array.shift()` is O(n) per call; with smoothing=3 the arrays are capped at 3 elements, so shift is O(1) in practice. Ring buffers would only matter for very large smoothing values. Already tracked in R6 (6.4) as a performance item. Not a code quality issue. |
+| 12.8 | ESLint configuration | **fix recommended** | **No `eslint.config.js` exists.** ESLint 9.27.0 and `@typescript-eslint/*` are installed as devDependencies but completely unenforced — running `npx eslint` fails with "couldn't find config file". No `npm run lint` script exists either. Plan ticket: `plan/2-eslint-setup.md` |
+| 12.9 | `result` variable in `peaks()` | **fix recommended** | :319 — `const result: Peak[] = [];` declared but never used. The generator yields peaks directly. Dead code. Fix ticket: `fix/2-code-quality-cleanup.md` |
+| 12.10 | `let` vs `const` in `peaks()` | **fix recommended** | :317-318 — `let left = new Array<Centroid>();` and `let right = new Array<Centroid>();`. Neither `left` nor `right` is ever reassigned; array contents are mutated via `.push()`/`.shift()` but the references are stable. Should be `const`. Fix ticket: `fix/2-code-quality-cleanup.md` |
+| 12.11 | `getPriorScore` vs `updateNextScore` naming | done | :392/:406 — "get" vs "update" suggests different side-effect profiles, but both are pure computations (no mutations). Naming inconsistency. However, renaming these methods touches the loss-score key mismatch area (R3, 3.2-3.5) which has a pending critical fix. **Defer renaming** until after `fix/4-loss-score-key-mismatch.md` is resolved to avoid merge conflicts. |
+| 12.12 | `for (let path of ...)` in `peaks()` | done | :322 — `let` is correct here; `path` is reassigned by the for-of loop on each iteration. No change needed. |
 
-**Follow-up tickets:** Remove commented-out code. Extract named constants. Fix `peaks()` dead variable. Standardize error-vs-return-zero behavior.
+**Follow-up tickets:**
+- `fix/2-code-quality-cleanup.md` — Remove commented-out code (:714-786), remove dead `result` variable in `peaks()`, `let` → `const` for `left`/`right` in `peaks()`, replace `min2()` with `Math.min`, remove prototype binding at :687, extract named constants for epsilon values
+- `plan/2-eslint-setup.md` — Create `eslint.config.js` with TypeScript rules, add `lint` script to package.json
 
 ---
 
