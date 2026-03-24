@@ -140,22 +140,88 @@ When any code path calls `_losses.find(centroidEntry)`, it uses `centroidEntry.l
 
 **Scope:** Identify untested scenarios and assess test quality.
 
+**Current state:** 131 tests across 12+ describe blocks. All pass. TypeScript type-checks clean.
+
+#### Gap Analysis (original ticket items)
+
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 5.1 | NaN/Infinity/negative-zero inputs | | **Not tested** — no tests for degenerate numeric inputs |
-| 5.2 | `maxCentroids=1` and `maxCentroids=2` boundary | | **Not tested** at minimum values |
-| 5.3 | Large-scale stress test (100K+ values) | | **Not tested** — no performance or memory regression tests |
-| 5.4 | Rank roundtrip: `rankAt(valueAt(r).value) ≈ r` | | **Not tested** — no property-based invariant checks |
-| 5.5 | `rankAt()` monotonicity | | **Not tested** — could add: for x1 < x2, rankAt(x1) <= rankAt(x2) |
-| 5.6 | `mergeFrom()` commutativity/associativity | | **Not tested** — merge(A,B) vs merge(B,A) vs merge(merge(A,B),C) |
-| 5.7 | Same value added many times | | Partially tested (duplicates exist); no dedicated 10K-same-value test |
-| 5.8 | `peaks()` with smoothing variations | | Tested at default; no tests for smoothing=1 or large smoothing values |
-| 5.9 | Iterator with quantile-based criteria | | **Not tested** |
-| 5.10 | `tightnessJ` monotonicity under compression | | **Not tested** — should increase (or stay same) with compression |
-| 5.11 | `countAt()` for zero-variance centroids | | Tested at exact values; not tested between zero-variance centroids (NaN risk per 2.2/2.5) |
-| 5.12 | Regression tests for v0.9.5 bug fixes | | Marker offset fix and combinedVariance fix — existing tests cover but no explicit regression markers |
+| 5.1 | NaN/Infinity/negative-zero inputs | **partial** | NaN (:766) and Infinity (:784) tested as BUG-documenting tests. **Negative-zero (`-0`) not tested** — `add(-0)` may or may not coalesce with `add(0)` depending on B+Tree comparator behavior with `Object.is` vs `===`. |
+| 5.2 | `maxCentroids=1` and `maxCentroids=2` boundary | **partial** | `maxCentroids=1`: tested via reduction (:935-941), combineSharedMean (:1163), weighted median (:1312). `maxCentroids=2`: tested only in `countAt` compressed (:366). **No dedicated test constructing `new Sparstogram(1)` or `new Sparstogram(2)` and exercising all query methods.** |
+| 5.3 | Large-scale stress test (100K+ values) | **not covered** | Largest test is 10K values (tightnessJ drift :1107). **No 100K+ test.** No memory profiling. |
+| 5.4 | Rank roundtrip: `rankAt(valueAt(r).value) ≈ r` | **not covered** | No property-based roundtrip test. `assertConsistent()` checks monotonicity at centroid values but not the roundtrip invariant. |
+| 5.5 | `rankAt()` monotonicity | **partial** | `assertConsistent()` (:1373-1379) checks monotonicity at centroid values only. **No sweep through arbitrary inter-centroid values.** |
+| 5.6 | `mergeFrom()` commutativity/associativity | **not covered** | Tests verify merge correctness but not `merge(A,B) ≈ merge(B,A)` or associativity. |
+| 5.7 | Same value added many times | **done** | 10K identical values (:901-921) with count, centroidCount, variance, and query verification. |
+| 5.8 | `peaks()` with smoothing variations | **partial** | Tested: default(3), smoothing=1, smoothing=10 (larger than dataset). **No systematic sweep** (smoothing=2, 4, 5). No test for `smoothing=0` behavior. |
+| 5.9 | Iterator with quantile-based criteria | **done** | Tested at (:620-624): `ascending({ quantile: sparstogram.valueAt(4) })`. |
+| 5.10 | `tightnessJ` monotonicity under compression | **not covered** | Drift accuracy tested (:1107-1128), but no test verifies tightnessJ behavior specifically during compression steps. |
+| 5.11 | `countAt()` for zero-variance centroids | **done** | Tested at (:1064-1072): `countAt(15)` between two zero-variance centroids at 10 and 20 returns finite value. |
+| 5.12 | Regression tests for v0.9.5 bug fixes | **not covered** | No explicit regression markers. Marker offset and combinedVariance fixes are covered by existing functional tests but not labeled as regressions. |
 
-**Follow-up tickets:** Add NaN/Infinity input tests. Add stress test suite. Add property-based invariant tests. Add zero-variance interpolation test.
+#### Additional Gaps Found During Review
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| 5.13 | `markerAt()` with out-of-bounds index | **not covered** | No test for `markerAt(markers.length)` or `markerAt(-1)` — both should throw "Invalid marker" but behavior not verified. |
+| 5.14 | `descending()` with invalid criteria | **not covered** | Only `ascending()` tested with invalid criteria (:602-606). `descending()` with `{}`, two-field criteria untested. |
+| 5.15 | Normal/Gaussian distribution | **not covered** | No test with normally-distributed data (e.g., Box-Muller generated). |
+| 5.16 | Skewed distribution (exponential, log-normal) | **not covered** | Only uniform, bimodal, sparse, and sine-wave distributions tested. |
+| 5.17 | Reverse/random input order | **not covered** | All tests use ascending, symmetric, or pattern-based input order. No test verifies that descending or random input order produces equivalent results. |
+| 5.18 | `append()` with multiple centroids in one call | **not covered** | All `append()` tests call with single centroid. The variadic `append(...centroids)` path with 2+ centroids in one call is untested. |
+| 5.19 | `edgeContribution()` exported function | **not covered** | Used internally in tests as a helper (:1118) but no dedicated test of the exported function's behavior with edge cases (zero count, same value, negative values). |
+| 5.20 | `peaks()` with plateau (flat top) | **not covered** | No test with data that has a flat peak (multiple consecutive equal counts). |
+
+#### Assertion Tolerance Assessment
+
+| Location | Tolerance | Verdict |
+|----------|-----------|---------|
+| `:272` `closeTo(50, 0.1)` | Median marker in uncompressed 100-value histogram | **Appropriate** — marker tracking is exact |
+| `:295` `closeTo(26.5, 1)` | Lower quartile after curvature-aware compression | **Appropriate** — loosened for scoring variation |
+| `:299` `within(45, 55)` | Median in 10-centroid compressed histogram | **Appropriate** — reasonable for lossy compression |
+| `:304` `within(40, 80)` | Upper quartile in compressed histogram | **Wide but acceptable** — 10 centroids for 97 values is very lossy |
+| `:336-337` `within(-800, 400)` | 10th percentile in maxCentroids=2 histogram | **Very wide** — documents limitation rather than testing accuracy |
+| `:1126` relative error < 0.01 | tightnessJ drift after 10K additions | **Appropriate** — 1% tolerance for heuristic metric |
+| `:1263` `maxCount/minCount > 10` | Uniform distribution asymmetry | **Appropriate** — documents inverted score formula bug |
+| `:1347` `loss < 1e6` | Compression loss magnitude | **Appropriate** — upper bound sanity check |
+
+**Verdict:** Tolerances are generally appropriate. The wide tolerances at `:304` and `:336-337` document limitations of extreme compression rather than testing precision. Consider tightening `:304` to `within(60, 80)` once the inverted score formula is fixed, as compression quality should improve.
+
+#### Distribution Diversity Assessment
+
+| Distribution | Covered? | Notes |
+|-------------|----------|-------|
+| Uniform (0..N) | ✅ | Extensively tested across many blocks |
+| Bimodal | ✅ | `:1268` — two separated clusters |
+| Sparse (few widely-spaced values) | ✅ | Multiple tests with {1, 100, 1000} patterns |
+| Dense with duplicates | ✅ | `:109-121`, `:178-190` |
+| Single value repeated | ✅ | 10K identical values `:901` |
+| Sine wave | ✅ | tightnessJ test `:1111` |
+| Normal/Gaussian | ❌ | **Gap** — no bell-curve distributed data |
+| Skewed (exponential) | ❌ | **Gap** — heavy-tail behavior untested |
+| Reverse input order | ❌ | **Gap** — order-dependence not tested |
+| Random input order | ❌ | **Gap** — only deterministic sequences |
+
+#### Error Path Coverage by Method
+
+| Method | Happy | Error | Missing |
+|--------|-------|-------|---------|
+| `constructor(maxCentroids, markers)` | ✅ | ✅ invalid markers | — |
+| `maxCentroids` setter | ✅ | ✅ value < 1 | — |
+| `add(value)` | ✅ | ⚠️ NaN/Infinity documented as BUG | `-0` input |
+| `append(...centroids)` | ✅ | ✅ count=0, variance<0 | multi-centroid variadic call |
+| `mergeFrom(other)` | ✅ | ✅ self-merge documented | commutativity |
+| `rankAt(value)` | ✅ | ✅ empty, extremes | — |
+| `valueAt(rank)` | ✅ | ✅ empty, 0, out-of-range | — |
+| `countAt(value)` | ✅ | ✅ empty, between, outside | — |
+| `quantileAt(quantile)` | ✅ | ✅ out-of-range, empty | — |
+| `markerAt(index)` | ✅ | ✅ empty | out-of-bounds index, negative index |
+| `peaks(smoothing)` | ✅ | ✅ empty, minimal, large smoothing | smoothing=0, plateau |
+| `ascending(criteria)` | ✅ | ✅ invalid criteria, empty | — |
+| `descending(criteria)` | ✅ | ✅ start at value, empty | invalid criteria |
+| `edgeContribution(u, v)` | ✅ (as helper) | ❌ | zero count, same value, exported function tests |
+
+**Follow-up ticket:** `plan/3-test-expansion.md` — property-based invariants, stress testing, distribution diversity, remaining error paths.
 
 ---
 
