@@ -34,16 +34,18 @@ All tickets live in `tickets/review/`. Findings from each review populate the se
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 1.1 | Curvature estimation from density differences (left/right neighbors) | | `localCurvature()` :420 — fallback when `l` or `r` is missing uses `dens(a,b)` as stand-in; verify this doesn't bias edge pairs |
-| 1.2 | Score formula: `baseLoss / (1e-9 + curvature)` — epsilon choice | | :403 — `1e-9` is tiny; near-zero curvature produces enormous scores — is this intentional? Could produce Infinity for perfectly flat regions |
-| 1.3 | Weighted median recentering vs weighted mean | | :580 — "weighted median" is a binary choice (`priorEntry.count >= minEntry.count`), not a true weighted median; naming may mislead |
-| 1.4 | `combinedVariance()` formula correctness | | :648 — Welford-style parallel variance; verify `ssBetween` term matches standard decomposition |
-| 1.5 | `combineSharedMean()` — assumes shared value (same bucket) | | :640 — denominator `count - 1` can be 0 when both counts are 1 (total=2, df=1) — OK, but verify no count=0 path |
-| 1.6 | Loss index ordering determinism (loss, value tiebreak) | | :79 — comparator `a.loss === b.loss ? a.value - b.value : a.loss - b.loss` — strict equality on floats may cause non-determinism |
-| 1.7 | `computeLoss()` includes `combinedVariance` additively | | :383 — distance and variance have different units/scales; no normalization factor |
-| 1.8 | Compression always selects globally optimal merge candidate | | Stale entries in `_losses` can cause retry; verify no valid pair is skipped |
+| 1.1 | Curvature estimation from density differences (left/right neighbors) | done | `localCurvature()` :420 — fallback when `l` or `r` is missing uses `dens(a,b)` as stand-in. This **inflates curvature for edge pairs**, which is mathematically equivalent to treating external density as 0 (boundary discontinuity). This is defensible for tail preservation, but interacts with the inverted score formula (1.2) to merge edges first. |
+| 1.2 | Score formula: `baseLoss / (1e-9 + curvature)` — **INVERTED** | **confirmed bug** | :403 — The formula gives LOW scores to HIGH curvature pairs, causing them to be merged first. This is **opposite** to the documented intent: README says "pairs at peaks/tails are preserved" but the code merges them preferentially. Uniform distribution test confirms: 100 values into 5 centroids produces one centroid at value=0 with count=96 and 4 individual tail centroids. Should likely be `baseLoss * (eps + curvature)` instead. Fix ticket: `fix/5-inverted-curvature-score-formula.md` |
+| 1.3 | Weighted median recentering vs weighted mean | done | :580 — binary choice `priorEntry.count >= minEntry.count`. For a two-element set, this IS the correct weighted median (the element where cumulative weight >= 50%). Naming is accurate. Test confirms: heavier member wins; equal counts → prior (lower value) wins due to `>=`. |
+| 1.4 | `combinedVariance()` formula correctness | done | :648 — Verified against standard parallel variance decomposition: `ssBetween = (nA * nB * (vA - vB)^2) / totalN` matches exactly. Edge cases correct: both count=1 → variance = diff²/2. Test confirms two points at {10,20} → variance=50. |
+| 1.5 | `combineSharedMean()` — assumes shared value (same bucket) | done | :640 — denominator `count - 1 = 1` when both are count=1 (total=2). Variance terms are 0 for count=1 inputs; result is 0. No count=0 path exists (guarded by `append()` validation). |
+| 1.6 | Loss index ordering determinism (loss, value tiebreak) | done | :79 — `===` on floats is deterministic in IEEE 754. Two different pairs producing identical loss is extremely unlikely; tiebreaker by value ensures total order. Not a correctness issue. |
+| 1.7 | `computeLoss()` includes `combinedVariance` additively | done | :383 — `weightedDistance` (value×count units) + `combinedVariance` (value² units). Different scales; relative weighting is data-dependent. Existing TODO in code acknowledges this. Design concern, not a correctness bug. |
+| 1.8 | Compression always selects globally optimal merge candidate | done | Stale entries in `_losses` are cleaned up lazily via recursive retry in `compressOneBucket()`. Valid pairs are never skipped — stale entries only cause extra retries. Performance concern (no depth limit), not correctness. |
 
-**Follow-up tickets:** Benchmark curvature scoring against naive closest-pair to quantify preservation benefit.
+**Follow-up tickets:**
+- `fix/5-inverted-curvature-score-formula.md` — **Critical**: score formula direction is inverted; multiply instead of divide (1.2)
+- README curvature scoring description needs correction after formula fix
 
 ---
 

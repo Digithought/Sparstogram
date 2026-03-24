@@ -1189,3 +1189,163 @@ describe('Edge Cases & Robustness', () => {
 		});
 	});
 });
+
+describe('Algorithm Correctness — Curvature-Aware Compression', () => {
+
+	describe('combinedVariance correctness', () => {
+		it('two single-point centroids at same value yields variance=0', () => {
+			const s = new Sparstogram(1);
+			s.add(5);
+			s.add(5);
+			const c = Array.from(s.ascending())[0];
+			expect(c.variance).to.equal(0);
+			expect(c.count).to.equal(2);
+		});
+
+		it('two single-point centroids at different values yields correct variance', () => {
+			// For values {10, 20}: mean=15, var = ((10-15)^2 + (20-15)^2) / (2-1) = 50
+			// combinedVariance: nA=1, nB=1, totalN=2, ssBetween = (1*1*(10-20)^2)/2 = 50
+			// result = 50 / 1 = 50
+			const s = new Sparstogram(1);
+			s.add(10);
+			s.add(20);
+			const c = Array.from(s.ascending())[0];
+			expect(c.variance).to.equal(50);
+		});
+
+		it('merged centroid variance matches manual calculation for 3 points', () => {
+			// Add 10, 20, 30 with maxCentroids=1 → all merge to one centroid
+			// Each pair merge accumulates variance via combinedVariance
+			const s = new Sparstogram(1);
+			s.add(10);
+			s.add(20);
+			s.add(30);
+			const c = Array.from(s.ascending())[0];
+			expect(c.count).to.equal(3);
+			// Variance should be > 0 since values differ
+			expect(c.variance).to.be.greaterThan(0);
+		});
+	});
+
+	describe('compression preserves total count', () => {
+		it('total count is preserved after heavy compression', () => {
+			const s = new Sparstogram(3);
+			for (let i = 0; i < 1000; i++) s.add(i);
+			expect(s.count).to.equal(1000);
+			expect(s.centroidCount).to.be.at.most(3);
+		});
+
+		it('total count preserved when maxCentroids shrinks to 1', () => {
+			const s = new Sparstogram(50);
+			for (let i = 0; i < 200; i++) s.add(i * 7);
+			s.maxCentroids = 1;
+			expect(s.count).to.equal(200);
+			expect(s.centroidCount).to.equal(1);
+		});
+	});
+
+	describe('compression quality — uniform distribution', () => {
+		it('BUG: uniform distribution collapses asymmetrically due to inverted score formula', () => {
+			// Curvature-aware scoring: score = baseLoss / (eps + curvature)
+			// For uniform data, interior curvature ≈ 0 → enormous score → preserved
+			// Edge curvature is inflated by fallback → small score → merged first
+			// This is inverted from the documented intent (README says flat regions merge first)
+			const s = new Sparstogram(5);
+			for (let i = 0; i < 100; i++) s.add(i);
+			const centroids = Array.from(s.ascending());
+			expect(centroids).to.have.lengthOf(5);
+
+			// Document the asymmetric compression: most mass ends up in one centroid
+			const maxCount = Math.max(...centroids.map(c => c.count));
+			const minCount = Math.min(...centroids.map(c => c.count));
+			// With 100 values in 5 centroids, ideal would be ~20 each
+			// Actual: one centroid has ~96 values, others have ~1 each
+			expect(maxCount / minCount).to.be.greaterThan(10,
+				'Uniform distribution should ideally have balanced centroids, but scoring formula causes heavy asymmetry');
+		});
+	});
+
+	describe('compression quality — bimodal distribution preserves modes', () => {
+		it('bimodal peaks are preserved when sufficiently separated', () => {
+			const s = new Sparstogram(5);
+			// Two distinct clusters with slight spread
+			for (let i = 0; i < 50; i++) {
+				s.add(10 + (i % 5) * 0.1);  // cluster around 10-10.4
+				s.add(90 + (i % 5) * 0.1);  // cluster around 90-90.4
+			}
+			const centroids = Array.from(s.ascending());
+			// Both clusters should have at least one centroid each
+			const lowCluster = centroids.filter(c => c.value < 50);
+			const highCluster = centroids.filter(c => c.value > 50);
+			expect(lowCluster.length).to.be.at.least(1, 'Low cluster should have at least one centroid');
+			expect(highCluster.length).to.be.at.least(1, 'High cluster should have at least one centroid');
+		});
+	});
+
+	describe('compression loss monotonicity', () => {
+		it('loss values returned by add() are non-negative', () => {
+			const s = new Sparstogram(5);
+			for (let i = 0; i < 100; i++) {
+				const loss = s.add(i);
+				expect(loss).to.be.at.least(0, `Loss at step ${i} should be non-negative`);
+			}
+		});
+	});
+
+	describe('score formula direction (documentation vs behavior)', () => {
+		it('README claims flat regions merge first, but edges merge first for uniform data', () => {
+			// If scoring preserved peaks/tails (as documented), a uniform distribution
+			// would be compressed roughly evenly (no peaks or tails to preserve).
+			// Instead, the edge-pair fallback curvature makes edges merge first.
+			const s = new Sparstogram(10);
+			for (let i = 0; i < 50; i++) s.add(i);
+			const centroids = Array.from(s.ascending());
+
+			// Document: the leftmost centroid tends to absorb many values
+			// because edge pairs have low scores and get merged repeatedly
+			const leftmostCount = centroids[0].count;
+			expect(leftmostCount).to.be.greaterThan(1,
+				'Leftmost centroid absorbs multiple values due to edge-first merging');
+		});
+	});
+
+	describe('weighted median recentering', () => {
+		it('merged centroid value equals the heavier member', () => {
+			// With 2 centroids to merge: heavier one keeps its value
+			const s = new Sparstogram(1);
+			// Add more values at 10 than at 20
+			for (let i = 0; i < 10; i++) s.add(10);
+			for (let i = 0; i < 3; i++) s.add(20);
+			const centroids = Array.from(s.ascending());
+			expect(centroids).to.have.lengthOf(1);
+			// Heavier member (10, count=10) should win the weighted median
+			expect(centroids[0].value).to.equal(10);
+		});
+
+		it('when counts are equal, prior (lower value) wins', () => {
+			// For equal counts, priorEntry.count >= minEntry.count is true
+			// priorEntry is the lower-value centroid
+			const s = new Sparstogram(1);
+			s.add(10);
+			s.add(20);
+			const centroids = Array.from(s.ascending());
+			expect(centroids).to.have.lengthOf(1);
+			// Equal counts: prior (10) wins because >= is true
+			expect(centroids[0].value).to.equal(10);
+		});
+	});
+
+	describe('compressOneBucket returns base loss not score', () => {
+		it('add() returns finite, positive loss when compression occurs', () => {
+			const s = new Sparstogram(3);
+			for (let i = 0; i < 3; i++) s.add(i * 10);
+			// Next add triggers compression
+			const loss = s.add(30);
+			expect(loss).to.be.greaterThan(0);
+			// Loss should be a reasonable value, not the curvature-adjusted score
+			// Score can be enormous (baseLoss / 1e-9) for flat regions
+			expect(loss).to.be.lessThan(1e6,
+				'Returned loss should be base loss, not curvature-adjusted score');
+		});
+	});
+});
