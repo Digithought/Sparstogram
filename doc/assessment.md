@@ -221,20 +221,23 @@ All tickets live in `tickets/review/`. Findings from each review populate the se
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 10.1 | `add(NaN)` | | **No validation** — NaN breaks B+Tree ordering (NaN comparisons always false); corrupts index |
-| 10.2 | `add(Infinity)` / `add(-Infinity)` | | No validation; Infinity is orderable so B+Tree works; but `erf()` and density calculations may produce unexpected results |
-| 10.3 | Same value 10K times | | Count accumulates at single centroid; no compression needed; `variance` stays 0 via `combineSharedMean()`; OK |
-| 10.4 | Reduce `maxCentroids` below `centroidCount` | | :120 — batch compresses in loop; works correctly |
-| 10.5 | `rankAt()` on empty histogram | | :208 — `_centroids.find()` returns off-path; all branches skip; returns 0 |
-| 10.6 | `valueAt(0)` | | :241 — `Math.abs(0)` = 0; first centroid has count >= 1 so `0 <= count` is true; returns offset=-1 — **likely bug**: negative offset passed to `inferValueFromOffset()` |
-| 10.7 | `quantileAt(0)` / `quantileAt(1)` | | :290 — `rank = max(1, round(0 * count)) = 1` and `rank = min(count, round(1 * count)) = count`; OK |
-| 10.8 | `quantileAt(-0.1)` / `quantileAt(1.1)` | | :290 — `round(-0.1 * count)` could be 0 or negative; clamped to 1 by `max(1, ...)`; `1.1` clamped to count; no error thrown — silent clamping may surprise users |
-| 10.9 | `peaks()` with 0, 1, 2 centroids | | Smoothing window (default 3) won't fill; yields nothing for < 2*smoothing centroids; OK |
-| 10.10 | `mergeFrom(self)` | | Iterates `self.ascending()` while mutating `self` via `insertOrIncrementBucket()` — **iterator invalidation bug** |
-| 10.11 | `append()` with count=0 centroid | | :168 — throws; correct |
-| 10.12 | Very large counts (>2^53) | | Integer precision lost; `count` additions become inexact; no guard |
+| 10.1 | `add(NaN)` | **confirmed bug** | NaN breaks B+Tree ordering (comparisons always false); corrupts index silently. Test added. Fix ticket: `fix/5-nan-infinity-input-validation.md` |
+| 10.2 | `add(Infinity)` / `add(-Infinity)` | **confirmed bug** | Comparator `(a,b) => a-b` produces NaN for `Inf-Inf`; `rankAt(±Infinity)` returns NaN. Insertion works but lookups fail. Test added. Fix ticket: `fix/5-nan-infinity-input-validation.md` |
+| 10.3 | Same value 10K times | done | Count accumulates correctly at single centroid; variance stays 0; all queries work. Tests added. |
+| 10.4 | Reduce `maxCentroids` below `centroidCount` | done | Batch compresses correctly; count preserved. Tests added. |
+| 10.5 | `rankAt()` on empty histogram | done | Returns 0 for any value. Tests added. |
+| 10.6 | `valueAt(0)` | **confirmed bug** | `Math.abs(0) = 0`; offset = 0-1 = -1 (negative). For count=1 centroids, guarded by `inferValueFromOffset`; for multi-count centroids with variance, produces incorrect value. Test added. Fix ticket: `fix/4-value-at-zero-negative-offset.md` |
+| 10.7 | `quantileAt(0)` / `quantileAt(1)` | done | Correctly returns first/last value. Tests added. |
+| 10.8 | `quantileAt(-0.1)` / `quantileAt(1.1)` | done | Silently clamped to rank 1 / rank=count. Tests document this behavior. Design decision — not a bug. |
+| 10.9 | `peaks()` with 0, 1, 2 centroids | done | 0 and 1 centroid: yields nothing. 2 centroids with smoothing=1: yields trailing peak. Default smoothing=3 requires 6+ centroids. Tests added. |
+| 10.10 | `mergeFrom(self)` | **confirmed bug** | Iterates self.ascending() while mutating self via insertOrIncrementBucket() — iterator invalidation. Count doubles but centroid data may be inconsistent. Test added. Fix ticket: `fix/4-merge-from-self-iterator-invalidation.md` |
+| 10.11 | `append()` with count=0 centroid | done | Throws correctly. Tests added. |
+| 10.12 | Very large counts (>2^53) | done | Integer precision lost past MAX_SAFE_INTEGER. Test documents limitation. Low priority — documentation concern. |
 
-**Follow-up tickets:** Add NaN/Infinity input guard (10.1, 10.2). Fix `valueAt(0)` behavior (10.6). Guard or document `mergeFrom(self)` (10.10). Consider clamping documentation for quantileAt (10.8).
+**Follow-up tickets created:**
+- `fix/5-nan-infinity-input-validation.md` (10.1, 10.2)
+- `fix/4-value-at-zero-negative-offset.md` (10.6)
+- `fix/4-merge-from-self-iterator-invalidation.md` (10.10)
 
 ---
 

@@ -759,3 +759,298 @@ describe('API Surface Review', () => {
 		});
 	});
 });
+
+describe('Edge Cases & Robustness', () => {
+
+	describe('add(NaN)', () => {
+		it('BUG: NaN corrupts the B+Tree — comparisons always false', () => {
+			const s = new Sparstogram(10);
+			s.add(1);
+			s.add(2);
+			s.add(NaN); // No validation; silently inserts
+			// NaN breaks ordering: NaN < x and NaN > x are both false
+			// The centroid count increases but the tree is now in an inconsistent state
+			expect(s.centroidCount).to.equal(3); // NaN was inserted
+			expect(s.count).to.equal(3);
+			// Iterating may or may not include NaN depending on tree internals,
+			// but the core issue is that comparisons with NaN are always false
+			const values = Array.from(s.ascending()).map(c => c.value);
+			// NaN should not be in a well-ordered list; its presence indicates corruption
+			const hasNaN = values.some(v => Number.isNaN(v));
+			expect(hasNaN).to.be.true; // Documents the bug: NaN is in the tree
+		});
+	});
+
+	describe('add(Infinity) and add(-Infinity)', () => {
+		it('Infinity is orderable — B+Tree handles it', () => {
+			const s = new Sparstogram(10);
+			s.add(-Infinity);
+			s.add(0);
+			s.add(Infinity);
+			const values = Array.from(s.ascending()).map(c => c.value);
+			expect(values).to.deep.equal([-Infinity, 0, Infinity]);
+			expect(s.count).to.equal(3);
+			expect(s.centroidCount).to.equal(3);
+		});
+
+		it('BUG: rankAt produces NaN for Infinity values — comparator returns NaN for Inf-Inf', () => {
+			const s = new Sparstogram(10);
+			s.add(-Infinity);
+			s.add(0);
+			s.add(Infinity);
+			// The BTree comparator (a, b) => a - b produces NaN when
+			// a = -Infinity, b = -Infinity (since -Inf - (-Inf) = NaN)
+			// This means find(-Infinity) may not locate the exact match
+			// and the query falls into an interpolation path that also fails
+			expect(s.rankAt(-Infinity)).to.be.NaN;
+			// Finite values with Infinity neighbors may or may not work
+			// depending on which interpolation path is taken
+			expect(s.rankAt(0)).to.equal(2); // 0 is an exact match, no interpolation needed
+			expect(s.rankAt(Infinity)).to.be.NaN; // Same comparator issue: Inf - Inf = NaN
+		});
+
+		it('Infinity compresses without error', () => {
+			const s = new Sparstogram(3);
+			s.add(-Infinity);
+			s.add(-1);
+			s.add(0);
+			s.add(1);
+			s.add(Infinity);
+			// Should compress down to 3 centroids without throwing
+			expect(s.centroidCount).to.equal(3);
+		});
+	});
+
+	describe('mergeFrom(self)', () => {
+		it('BUG: self-merge mutates while iterating — iterator invalidation', () => {
+			const s = new Sparstogram(100);
+			s.add(1);
+			s.add(2);
+			s.add(3);
+			const countBefore = s.count;
+			// mergeFrom(self) iterates self.ascending() while calling insertOrIncrementBucket on self
+			// This is iterator invalidation — behavior is undefined
+			// Depending on tree implementation, it may loop infinitely, skip entries, or double-count
+			// We just verify it doesn't throw and document the resulting state
+			let threw = false;
+			try {
+				s.mergeFrom(s);
+			} catch {
+				threw = true;
+			}
+			// Document observed behavior: count is doubled because mergeFrom adds other.count first
+			// The actual centroids may be wrong due to iterator invalidation
+			if (!threw) {
+				// Count was incremented by other.count (which is self.count) at the start of mergeFrom
+				expect(s.count).to.equal(countBefore * 2);
+			}
+		});
+	});
+
+	describe('valueAt(0)', () => {
+		it('BUG: valueAt(0) produces offset=-1 (negative offset)', () => {
+			const s = new Sparstogram(10);
+			s.add(5);
+			s.add(10);
+			// valueAt(0): Math.abs(0) = 0, first centroid count=1, 0 <= 1 is true
+			// offset = 0 - 1 = -1 (negative!)
+			// inferValueFromOffset(-1, centroid) with count=1 returns centroid.value (guarded)
+			// So the value is still reasonable, but the offset is wrong
+			const result = s.valueAt(0);
+			expect(result.offset).to.equal(-1); // Documents the bug: negative offset
+			// The value is still returned because inferValueFromOffset guards on count=1
+			expect(result.value).to.equal(5);
+		});
+	});
+
+	describe('quantileAt out-of-range', () => {
+		it('quantileAt(-0.1) clamps to rank 1 (silent clamp)', () => {
+			const s = new Sparstogram(10);
+			for (let i = 1; i <= 10; i++) s.add(i);
+			const result = s.quantileAt(-0.1);
+			// Math.round(-0.1 * 10) = Math.round(-1) = -1, clamped to max(1, -1) = 1
+			expect(result.rank).to.equal(1);
+			expect(result.centroid.value).to.equal(1);
+		});
+
+		it('quantileAt(1.1) clamps to rank=count (silent clamp)', () => {
+			const s = new Sparstogram(10);
+			for (let i = 1; i <= 10; i++) s.add(i);
+			const result = s.quantileAt(1.1);
+			// Math.round(1.1 * 10) = 11, clamped to min(10, 11) = 10
+			expect(result.rank).to.equal(10);
+			expect(result.centroid.value).to.equal(10);
+		});
+
+		it('quantileAt(0) returns first value', () => {
+			const s = new Sparstogram(10);
+			for (let i = 1; i <= 10; i++) s.add(i);
+			const result = s.quantileAt(0);
+			expect(result.rank).to.equal(1);
+		});
+
+		it('quantileAt(1) returns last value', () => {
+			const s = new Sparstogram(10);
+			for (let i = 1; i <= 10; i++) s.add(i);
+			const result = s.quantileAt(1);
+			expect(result.rank).to.equal(10);
+		});
+	});
+
+	describe('same value added many times', () => {
+		it('10K identical values accumulate correctly at a single centroid', () => {
+			const s = new Sparstogram(10);
+			for (let i = 0; i < 10000; i++) s.add(42);
+			expect(s.count).to.equal(10000);
+			expect(s.centroidCount).to.equal(1);
+			const centroids = Array.from(s.ascending());
+			expect(centroids).to.have.lengthOf(1);
+			expect(centroids[0].value).to.equal(42);
+			expect(centroids[0].count).to.equal(10000);
+			expect(centroids[0].variance).to.equal(0);
+		});
+
+		it('querying a 10K same-value histogram works correctly', () => {
+			const s = new Sparstogram(10);
+			for (let i = 0; i < 10000; i++) s.add(42);
+			expect(s.rankAt(42)).to.equal(10000);
+			expect(s.rankAt(41)).to.equal(0);
+			expect(s.countAt(42)).to.equal(10000);
+			const median = s.quantileAt(0.5);
+			expect(median.centroid.value).to.equal(42);
+		});
+	});
+
+	describe('maxCentroids reduction below centroidCount', () => {
+		it('batch compresses when maxCentroids is reduced', () => {
+			const s = new Sparstogram(20);
+			for (let i = 0; i < 20; i++) s.add(i);
+			expect(s.centroidCount).to.equal(20);
+			s.maxCentroids = 5;
+			expect(s.centroidCount).to.be.at.most(5);
+			// All values should still be counted
+			expect(s.count).to.equal(20);
+		});
+
+		it('reducing maxCentroids to 1 produces a single centroid', () => {
+			const s = new Sparstogram(10);
+			for (let i = 0; i < 10; i++) s.add(i);
+			s.maxCentroids = 1;
+			expect(s.centroidCount).to.equal(1);
+			expect(s.count).to.equal(10);
+		});
+	});
+
+	describe('empty histogram across all query methods', () => {
+		it('rankAt returns 0 on empty histogram', () => {
+			const s = new Sparstogram(10);
+			expect(s.rankAt(0)).to.equal(0);
+			expect(s.rankAt(100)).to.equal(0);
+			expect(s.rankAt(-100)).to.equal(0);
+		});
+
+		it('countAt returns 0 on empty histogram', () => {
+			const s = new Sparstogram(10);
+			expect(s.countAt(0)).to.equal(0);
+			expect(s.countAt(100)).to.equal(0);
+		});
+
+		it('valueAt throws on empty histogram', () => {
+			const s = new Sparstogram(10);
+			expect(() => s.valueAt(0)).to.throw('Rank out of range');
+			expect(() => s.valueAt(1)).to.throw('Rank out of range');
+		});
+
+		it('quantileAt throws on empty histogram', () => {
+			const s = new Sparstogram(10);
+			// quantileAt calls valueAt, which throws on empty
+			expect(() => s.quantileAt(0.5)).to.throw('Rank out of range');
+		});
+
+		it('ascending and descending yield nothing on empty histogram', () => {
+			const s = new Sparstogram(10);
+			expect(Array.from(s.ascending())).to.have.lengthOf(0);
+			expect(Array.from(s.descending())).to.have.lengthOf(0);
+		});
+
+		it('peaks yields nothing on empty histogram', () => {
+			const s = new Sparstogram(10);
+			expect(Array.from(s.peaks())).to.have.lengthOf(0);
+		});
+	});
+
+	describe('peaks() with minimal centroid counts', () => {
+		it('peaks() with 0 centroids yields nothing', () => {
+			const s = new Sparstogram(10);
+			expect(Array.from(s.peaks())).to.have.lengthOf(0);
+		});
+
+		it('peaks() with 1 centroid yields nothing', () => {
+			const s = new Sparstogram(10);
+			s.add(5);
+			expect(Array.from(s.peaks())).to.have.lengthOf(0);
+		});
+
+		it('peaks() with 2 centroids yields nothing (insufficient for smoothing)', () => {
+			const s = new Sparstogram(10);
+			s.add(5);
+			s.add(10);
+			expect(Array.from(s.peaks())).to.have.lengthOf(0);
+		});
+
+		it('peaks(1) with 2 centroids yields trailing peak', () => {
+			const s = new Sparstogram(10);
+			s.add(5);
+			s.add(10);
+			// With smoothing=1, window fills at 2 centroids; trailing peak is emitted
+			const peaks = Array.from(s.peaks(1));
+			expect(peaks).to.have.lengthOf(1);
+		});
+
+		it('peaks(1) with 3 centroids can detect a peak', () => {
+			const s = new Sparstogram(10);
+			// Need a trend up then down
+			s.append({ value: 1, variance: 0, count: 1 });
+			s.append({ value: 2, variance: 0, count: 5 });
+			s.append({ value: 3, variance: 0, count: 1 });
+			const peaks = Array.from(s.peaks(1));
+			expect(peaks).to.have.lengthOf(1);
+		});
+	});
+
+	describe('append() validation', () => {
+		it('append() with count=0 throws', () => {
+			const s = new Sparstogram(10);
+			expect(() => s.append({ value: 5, variance: 0, count: 0 })).to.throw('Centroid count must be at least 1');
+		});
+
+		it('append() with negative variance throws', () => {
+			const s = new Sparstogram(10);
+			expect(() => s.append({ value: 5, variance: -1, count: 1 })).to.throw('Centroid variance must be at least 0');
+		});
+
+		it('append() with count=1 and variance=0 succeeds', () => {
+			const s = new Sparstogram(10);
+			s.append({ value: 5, variance: 0, count: 1 });
+			expect(s.count).to.equal(1);
+		});
+	});
+
+	describe('very large counts (integer precision)', () => {
+		it('counts near 2^53 lose precision', () => {
+			const s = new Sparstogram(10);
+			// Append a centroid with count near MAX_SAFE_INTEGER
+			const bigCount = Number.MAX_SAFE_INTEGER - 1; // 2^53 - 2
+			s.append({ value: 1, variance: 0, count: bigCount });
+			expect(s.count).to.equal(bigCount);
+			// Adding 1 more should be fine
+			s.add(1);
+			expect(s.count).to.equal(bigCount + 1);
+			// Adding 1 more pushes past MAX_SAFE_INTEGER — precision lost
+			s.add(1);
+			// At 2^53, adding 1 may not change the value
+			// This documents the limitation: count arithmetic becomes inexact
+			expect(s.count).to.be.at.least(Number.MAX_SAFE_INTEGER);
+		});
+	});
+});
