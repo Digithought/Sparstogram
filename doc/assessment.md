@@ -80,16 +80,35 @@ All tickets live in `tickets/review/`. Findings from each review populate the se
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 3.1 | Insert path: loss index updated for new pair + affected neighbor | | :463-475 — inserts loss for new centroid, updates next's loss; correct |
-| 3.2 | Update (increment existing) path: loss index updated | | :447-449 — updates loss at old key position; relies on `_losses.find(entry)` matching by reference — **verify digitree find semantics** |
-| 3.3 | Stale entry detection in `compressOneBucket()` | | :542-570 — recursive retry on stale; **no depth limit** — could stack overflow if many stale entries |
-| 3.4 | Loss key after merge: old entries for deleted centroids | | :609-610 — deletes both old loss entries; inserts new one; but affected neighbor (next) is updated via `updateNext` which also touches loss index |
-| 3.5 | `updateNext()` double-update risk | | :526 — finds next's loss entry by `_losses.find(nextEntry)` where `nextEntry` is the old object — if loss was already updated, find may fail |
-| 3.6 | `mergeFrom()` batch compression | | :193-198 — batches of `maxCentroids/4`; inner loop calls `compressOneBucket()` which is standard path; OK |
-| 3.7 | `maxCentroids` setter triggers compression loop | | :120-122 — `while` loop; each `compressOneBucket()` decrements count; terminates correctly |
-| 3.8 | Iterator invalidation during mutation | | Iterators (`ascending`/`descending`) yield lazily; if `add()` called during iteration, tree mutation invalidates paths — **not documented** |
+| 3.1 | Insert path: loss index updated for new pair + affected neighbor | done | :463-464 — new centroid: `_centroids.insert` stores base loss, `_losses.insert` stores score. Insert path itself is correct (both use `.insert`, no `find` needed). The `updateNext` call at :475 triggers the key-mismatch issue (see 3.2). |
+| 3.2 | Update (increment existing) path: loss index updated | **confirmed bug** | :447-448 — `_losses.find(entry)` searches by `entry.loss` (base loss from CentroidEntry) but the stored loss entry has `.loss` = curvature-aware score. Since `score = baseLoss / (eps + curvature) ≠ baseLoss`, the find returns a not-on path and `updateAt` silently no-ops. The old stale entry remains in `_losses`. Verified: digitree `find` uses comparator-based binary search, not reference equality. Duck typing from CentroidEntry→Loss is structurally valid but the `.loss` field semantically mismatches (base vs score). |
+| 3.3 | Stale entry detection in `compressOneBucket()` | **confirmed risk** | :542-570 — recursive retry with no depth limit. Each failed `_losses.find` (3.2, 3.4, 3.5) leaves orphaned/stale entries. Compression cleans one stale entry per recursive call. For a `mergeFrom` of N centroids, up to O(N) stale entries can accumulate → O(N) recursion depth. JS stack limit (~10K-25K frames) can be exceeded for large merges. |
+| 3.4 | Loss key after merge: old entries for deleted centroids | **confirmed bug** | :610 — `_losses.deleteAt(_losses.find(priorEntry)!)` fails because `priorEntry.loss` (base) ≠ stored `.loss` (score). The old loss entry for the deleted prior centroid is orphaned. New merged entry is correctly inserted at :611. The orphan is later cleaned up when `compressOneBucket` picks it (centroid gone → stale → retry at :542-544). |
+| 3.5 | `updateNext()` double-update risk | **confirmed bug** | :533 — same root cause as 3.2. `_losses.find(nextEntry)` uses `nextEntry.loss` (base) to search but stored entry has `.loss` (score). The find fails silently, `updateAt` is a no-op, and next's old loss entry remains stale in `_losses`. The next centroid's `_centroids` entry IS correctly updated (line 532), so queries are unaffected — only the loss priority queue is stale. |
+| 3.6 | `mergeFrom()` batch compression | done | :193-198 — batches of `maxCentroids/4`; each calls `compressOneBucket()` which is the standard path. Correct structurally, but inherits the stale-entry accumulation from 3.2-3.5, amplified by the large number of insertions. |
+| 3.7 | `maxCentroids` setter triggers compression loop | done | :120-122 — `while` loop; each `compressOneBucket()` decrements `_centroidCount`; terminates correctly. Compression itself works (picks a pair, merges, produces correct centroid data). The stale entries in `_losses` affect merge-pair selection optimality but not termination. |
+| 3.8 | Iterator invalidation during mutation | **confirmed — undocumented** | `ascending()`/`descending()` yield lazily from digitree paths. If `add()` or `compressOneBucket()` is called during iteration, B+Tree mutations invalidate internal path references. Manifests in `mergeFrom(self)` (already tracked in `fix/4-merge-from-self-iterator-invalidation.md`). No JSDoc warning on iterators. |
 
-**Follow-up tickets:** Add recursion depth limit to `compressOneBucket()` stale-entry retry. Document iterator invalidation behavior.
+**Root Cause Analysis:**
+
+The systematic issue across 3.2, 3.4, and 3.5 is a **key-domain mismatch** between the two B+Trees:
+- `_centroids` stores `CentroidEntry.loss` = **base pair loss** (from `computeLoss` / `getPriorLoss`)
+- `_losses` stores `Loss.loss` = **curvature-aware score** (from `getPriorScore` / `updateNextScore`)
+- Score = baseLoss / (1e-9 + curvature), so score ≠ baseLoss except when there is no prior (both Infinity)
+
+When any code path calls `_losses.find(centroidEntry)`, it uses `centroidEntry.loss` (base) as the search key, but the stored entries are keyed by score. The comparator never returns 0 → find fails → `updateAt`/`deleteAt` is a no-op.
+
+**Impact:**
+- **Not a crash bug**: The stale entry cleanup in `compressOneBucket()` prevents errors
+- **Suboptimal compression**: Merge-pair selection uses stale scores, not current ones
+- **Memory growth**: `_losses` tree accumulates orphaned entries (2 per merge: one from failed delete at :610, one from failed update at :533)
+- **Stack overflow risk**: Recursive retry depth proportional to stale entry count
+- **Centroid data correctness is NOT affected**: `_centroids` tree is always updated correctly; only the loss priority queue is stale
+
+**Follow-up tickets:**
+- `fix/4-loss-score-key-mismatch.md` — **Core fix**: store score (not base loss) in CentroidEntry.loss, or add a separate score field, or search _losses by score
+- `fix/3-compress-recursion-depth-limit.md` — Convert recursive retry to iterative loop with depth limit
+- `fix/3-iterator-invalidation-docs.md` — Document iterator invalidation behavior in JSDoc on `ascending()`/`descending()`
 
 ---
 

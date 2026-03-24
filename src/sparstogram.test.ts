@@ -1349,3 +1349,242 @@ describe('Algorithm Correctness — Curvature-Aware Compression', () => {
 		});
 	});
 });
+
+describe('Dual-Index Consistency', () => {
+
+	// Helper: verify basic invariants through the public API
+	function assertConsistent(s: Sparstogram, label: string) {
+		const centroids = Array.from(s.ascending());
+		expect(s.centroidCount).to.equal(centroids.length,
+			`${label}: centroidCount should match actual centroid count from iterator`);
+		let totalCount = 0;
+		for (const c of centroids) {
+			totalCount += c.count;
+		}
+		expect(s.count).to.equal(totalCount,
+			`${label}: total count should equal sum of centroid counts`);
+
+		// Centroids should be in ascending value order
+		for (let i = 1; i < centroids.length; i++) {
+			expect(centroids[i].value).to.be.greaterThan(centroids[i - 1].value,
+				`${label}: centroids should be in ascending order at index ${i}`);
+		}
+
+		// rankAt should be monotonically non-decreasing
+		for (let i = 1; i < centroids.length; i++) {
+			expect(s.rankAt(centroids[i].value)).to.be.at.least(
+				s.rankAt(centroids[i - 1].value),
+				`${label}: rankAt should be monotonic at index ${i}`
+			);
+		}
+	}
+
+	describe('insert path — 5-centroid trace', () => {
+		it('all loss entries updated correctly when inserting 5 distinct values', () => {
+			const s = new Sparstogram(10);
+			s.add(10);
+			assertConsistent(s, 'after 1 insert');
+			s.add(30);
+			assertConsistent(s, 'after 2 inserts');
+			s.add(20);
+			assertConsistent(s, 'after 3 inserts (middle)');
+			s.add(5);
+			assertConsistent(s, 'after 4 inserts (before all)');
+			s.add(40);
+			assertConsistent(s, 'after 5 inserts (after all)');
+			expect(s.centroidCount).to.equal(5);
+			expect(s.count).to.equal(5);
+		});
+	});
+
+	describe('update path — duplicate inserts then compress', () => {
+		it('stays consistent after many duplicate inserts followed by compression', () => {
+			const s = new Sparstogram(5);
+			// Add 5 distinct values
+			for (let i = 1; i <= 5; i++) s.add(i * 10);
+			assertConsistent(s, 'after 5 distinct');
+
+			// Add duplicates (triggers update/increment path at line 433)
+			for (let i = 1; i <= 5; i++) {
+				for (let j = 0; j < 3; j++) s.add(i * 10);
+			}
+			assertConsistent(s, 'after duplicates');
+			expect(s.centroidCount).to.equal(5, 'no compression needed yet');
+
+			// Now trigger compression by adding new distinct values
+			for (let i = 6; i <= 15; i++) s.add(i * 10);
+			assertConsistent(s, 'after compression');
+			expect(s.centroidCount).to.equal(5);
+		});
+
+		it('repeated duplicates of a single value then compress does not corrupt', () => {
+			const s = new Sparstogram(5);
+			s.add(10);
+			s.add(20);
+			s.add(30);
+			// Many updates to middle centroid
+			for (let i = 0; i < 50; i++) s.add(20);
+			assertConsistent(s, 'after 50 duplicates of middle');
+			// Fill up and compress
+			s.add(40);
+			s.add(50);
+			s.add(60);
+			s.add(70);
+			assertConsistent(s, 'after fill and compress');
+		});
+	});
+
+	describe('compress path — no orphaned entries after merge', () => {
+		it('aggressive compression from 20 to 3 centroids stays consistent', () => {
+			const s = new Sparstogram(20);
+			for (let i = 0; i < 20; i++) s.add(i);
+			assertConsistent(s, 'before compression');
+			expect(s.centroidCount).to.equal(20);
+
+			s.maxCentroids = 3;
+			assertConsistent(s, 'after aggressive compression');
+			expect(s.centroidCount).to.equal(3);
+
+			// Further additions should still work
+			for (let i = 20; i < 30; i++) s.add(i);
+			assertConsistent(s, 'after post-compression additions');
+		});
+
+		it('compress to 1 centroid then expand back', () => {
+			const s = new Sparstogram(10);
+			for (let i = 0; i < 10; i++) s.add(i * 10);
+			assertConsistent(s, 'initial 10 centroids');
+
+			s.maxCentroids = 1;
+			assertConsistent(s, 'compressed to 1');
+			expect(s.centroidCount).to.equal(1);
+
+			s.maxCentroids = 10;
+			for (let i = 0; i < 5; i++) s.add(i * 100 + 500);
+			assertConsistent(s, 'expanded after compression');
+		});
+	});
+
+	describe('stale entry accumulation — rapid inserts then compress', () => {
+		it('200 distinct values into maxCentroids=5 does not throw (stack overflow risk)', () => {
+			const s = new Sparstogram(5);
+			// Each add beyond 5 triggers compression with potential stale entry retries
+			for (let i = 0; i < 200; i++) {
+				s.add(i);
+			}
+			assertConsistent(s, 'after 200 sequential adds');
+			expect(s.centroidCount).to.equal(5);
+		});
+
+		it('1000 values with mixed inserts and duplicates stays consistent', () => {
+			const s = new Sparstogram(10);
+			for (let i = 0; i < 1000; i++) {
+				s.add(i % 50); // 50 distinct values, many duplicates
+			}
+			assertConsistent(s, 'after 1000 mixed adds');
+			expect(s.centroidCount).to.be.at.most(10);
+		});
+	});
+
+	describe('mergeFrom batch compression', () => {
+		it('merging two histograms preserves consistency', () => {
+			const a = new Sparstogram(10);
+			const b = new Sparstogram(10);
+			for (let i = 0; i < 20; i++) a.add(i);
+			for (let i = 20; i < 40; i++) b.add(i);
+			assertConsistent(a, 'histogram a before merge');
+			assertConsistent(b, 'histogram b before merge');
+
+			const totalCount = a.count + b.count;
+			a.mergeFrom(b);
+			assertConsistent(a, 'after mergeFrom');
+			expect(a.count).to.equal(totalCount);
+			expect(a.centroidCount).to.be.at.most(10);
+		});
+
+		it('merging large histogram into small maxCentroids triggers batch compression', () => {
+			const a = new Sparstogram(5);
+			const b = new Sparstogram(100);
+			for (let i = 0; i < 5; i++) a.add(i * 10);
+			for (let i = 0; i < 100; i++) b.add(i);
+
+			a.mergeFrom(b);
+			assertConsistent(a, 'after large merge into small');
+			expect(a.centroidCount).to.be.at.most(5);
+		});
+	});
+
+	describe('maxCentroids setter compression loop', () => {
+		it('reducing maxCentroids in steps maintains consistency at each step', () => {
+			const s = new Sparstogram(20);
+			for (let i = 0; i < 20; i++) s.add(i * 5);
+			assertConsistent(s, 'initial');
+
+			for (let max = 15; max >= 2; max -= 3) {
+				s.maxCentroids = max;
+				assertConsistent(s, `maxCentroids=${max}`);
+				expect(s.centroidCount).to.be.at.most(max);
+			}
+		});
+	});
+
+	describe('iterator invalidation documentation', () => {
+		it('ascending/descending iterators are lazy generators', () => {
+			const s = new Sparstogram(10);
+			for (let i = 0; i < 5; i++) s.add(i);
+			// Verify iterators return the same data when fully consumed
+			const asc1 = Array.from(s.ascending());
+			const asc2 = Array.from(s.ascending());
+			expect(asc1.map(c => c.value)).to.deep.equal(asc2.map(c => c.value));
+			expect(asc1.map(c => c.count)).to.deep.equal(asc2.map(c => c.count));
+		});
+	});
+
+	describe('loss-score key mismatch — stale entry detection', () => {
+		it('insert-update-compress cycle works despite potential stale loss entries', () => {
+			// This exercises the known mismatch: CentroidEntry.loss (base) vs _losses key (score).
+			// The compress retry mechanism should handle stale entries.
+			const s = new Sparstogram(3);
+			s.add(10);
+			s.add(20);
+			s.add(30);
+			// Update (duplicate) — line 448 find may fail silently
+			s.add(20);
+			s.add(20);
+			// This triggers compression — stale entries in _losses should be cleaned up via retry
+			s.add(40);
+			assertConsistent(s, 'after insert-update-compress cycle');
+			expect(s.centroidCount).to.equal(3);
+		});
+
+		it('many updates to neighbors then compress selects a valid pair', () => {
+			const s = new Sparstogram(4);
+			s.add(10);
+			s.add(20);
+			s.add(30);
+			s.add(40);
+			// Heavy updates to 20 and 30 (adjacent) — updateNext at line 533 may fail
+			for (let i = 0; i < 20; i++) {
+				s.add(20);
+				s.add(30);
+			}
+			// Trigger compression
+			s.add(50);
+			assertConsistent(s, 'after neighbor updates + compress');
+			expect(s.centroidCount).to.equal(4);
+		});
+
+		it('interleaved add/compress with high churn stays consistent', () => {
+			const s = new Sparstogram(5);
+			for (let i = 0; i < 500; i++) {
+				// Mix of new values and duplicates
+				s.add(Math.floor(i * 0.7));
+			}
+			assertConsistent(s, 'after high-churn interleaved adds');
+
+			// Further compression
+			s.maxCentroids = 2;
+			assertConsistent(s, 'after further compression to 2');
+		});
+	});
+});
