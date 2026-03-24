@@ -655,3 +655,107 @@ describe('Sparstogram Iterators', () => {
 
 	// Optionally, tests for criteria using markerIndex if your implementation supports and can demonstrate this functionality.
 });
+
+describe('API Surface Review', () => {
+	describe('Criteria validation — 2-of-3 rejection', () => {
+		// BUG: criteriaToPath (:625) only throws when ALL THREE fields are set.
+		// Two-of-three silently picks one based on precedence (markerIndex > quantile > value).
+		// These tests document the current (buggy) behavior; see fix ticket.
+		it('BUG: value + markerIndex does not throw (should reject)', () => {
+			const s = new Sparstogram(10, [0.5]);
+			[10, 20, 5, 15, 25].forEach(v => s.add(v));
+			// Currently does NOT throw — markerIndex takes precedence silently
+			const values = Array.from(s.ascending({ value: 15, markerIndex: 0 })).map(c => c.value);
+			expect(values).to.deep.equal([15, 20, 25]); // uses markerIndex, ignores value
+		});
+
+		it('BUG: value + quantile does not throw (should reject)', () => {
+			const s = new Sparstogram(10, [0.5]);
+			[10, 20, 5, 15, 25].forEach(v => s.add(v));
+			const q = s.valueAt(1);
+			// Currently does NOT throw — quantile takes precedence silently
+			const values = Array.from(s.ascending({ value: 15, quantile: q })).map(c => c.value);
+			expect(values).to.deep.equal([5, 10, 15, 20, 25]); // uses quantile (rank 1 = first), ignores value
+		});
+
+		it('BUG: markerIndex + quantile does not throw (should reject)', () => {
+			const s = new Sparstogram(10, [0.5]);
+			[10, 20, 5, 15, 25].forEach(v => s.add(v));
+			const q = s.valueAt(1);
+			// Currently does NOT throw — markerIndex takes precedence silently
+			const values = Array.from(s.ascending({ markerIndex: 0, quantile: q })).map(c => c.value);
+			expect(values).to.deep.equal([15, 20, 25]); // uses markerIndex, ignores quantile
+		});
+
+		it('rejects all three together', () => {
+			const s = new Sparstogram(10, [0.5]);
+			[10, 20, 5, 15, 25].forEach(v => s.add(v));
+			const q = s.valueAt(1);
+			expect(() => Array.from(s.ascending({ value: 15, markerIndex: 0, quantile: q }))).to.throw();
+		});
+	});
+
+	describe('CentroidEntry leak through iterators', () => {
+		it('BUG: iterators expose internal loss field on centroids', () => {
+			const s = new Sparstogram(10);
+			[10, 20, 30].forEach(v => s.add(v));
+			for (const c of s.ascending()) {
+				// The declared return type is Centroid (value, variance, count)
+				// but the actual runtime object is CentroidEntry which also has loss
+				const keys = Object.keys(c);
+				// This documents the leak — loss field is present at runtime
+				expect(keys).to.include('loss');
+			}
+		});
+	});
+
+	describe('Error handling consistency', () => {
+		it('rankAt returns 0 on empty histogram (does not throw)', () => {
+			const s = new Sparstogram(10);
+			expect(s.rankAt(5)).to.equal(0);
+		});
+
+		it('countAt returns 0 on empty histogram (does not throw)', () => {
+			const s = new Sparstogram(10);
+			expect(s.countAt(5)).to.equal(0);
+		});
+
+		it('valueAt throws on empty histogram', () => {
+			const s = new Sparstogram(10);
+			expect(() => s.valueAt(1)).to.throw();
+		});
+
+		it('markerAt throws on empty histogram', () => {
+			const s = new Sparstogram(10, [0.5]);
+			expect(() => s.markerAt(0)).to.throw();
+		});
+	});
+
+	describe('markers constructor parameter visibility', () => {
+		it('markers array is publicly accessible on instance', () => {
+			const s = new Sparstogram(10, [0.25, 0.5, 0.75]);
+			// The public modifier on `markers` makes it visible on the instance
+			expect(s.markers).to.deep.equal([0.25, 0.5, 0.75]);
+		});
+
+		it('markers array is frozen (not mutable)', () => {
+			const s = new Sparstogram(10, [0.25, 0.5, 0.75]);
+			expect(Object.isFrozen(s.markers)).to.be.true;
+		});
+	});
+
+	describe('valueAt rank convention', () => {
+		it('valueAt error message does not state valid range', () => {
+			const s = new Sparstogram(10);
+			s.add(5);
+			s.add(10);
+			try {
+				s.valueAt(100);
+				expect.fail('should have thrown');
+			} catch (e: any) {
+				// Error message should ideally state valid range 1..count or -count..-1
+				expect(e.message).to.equal('Rank out of range');
+			}
+		});
+	});
+});
