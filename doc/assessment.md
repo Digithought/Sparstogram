@@ -250,18 +250,21 @@ When any code path calls `_losses.find(centroidEntry)`, it uses `centroidEntry.l
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 7.1 | README formulas vs code | | Curvature formula in README should match `localCurvature()` implementation — needs cross-check |
-| 7.2 | README usage examples compilable? | | Examples show `import { Sparstogram }` — correct; API calls match current signatures |
-| 7.3 | "Limitations" section completeness | | Lists no formal epsilon-bounds, no adaptive maxCentroids — correct; missing: no NaN handling, no serialization |
-| 7.4 | JSDoc on all public methods | | Most methods have JSDoc; `ascending()`/`descending()` criteria param could be more detailed |
-| 7.5 | Return type documentation for edge cases | | `valueAt()` throws on out-of-range but JSDoc doesn't mention it; `markerAt()` same |
-| 7.6 | Complexity claims | | README mentions "roughly O(log n)" — matches implementation via B+Tree |
-| 7.7 | `doc/figures/` referenced? | | `complex-diagram.jpg` and `simple-diagram.jpg` present but **not referenced in README** |
-| 7.8 | Time-window aggregation | | Mentioned in README as future/advanced topic — not implemented; could confuse users |
-| 7.9 | Distributed merge guidance | | `mergeFrom()` documented; caveats about marker loss during merge not mentioned |
-| 7.10 | No CHANGELOG | | Version history not tracked; breaking changes between versions undocumented |
+| 7.1 | README formulas vs code | done | **All formulas match code.** Curvature (:84-88 vs `localCurvature()` :420-424) ✅ — README omits the `1e-12` epsilon guard in density denominator and the edge-pair fallback behavior, but these are implementation details. Score formula (:98 vs :403) ✅. baseLoss (:118 vs :377-383) ✅. tightnessJ (:138 vs :682-683) ✅. combinedVariance (:120-125 vs :648-671) ✅. normalCDF/density (:433-434 vs :688-835) ✅. **Caveat:** Score formula and prose are contradictory — README :108-111 says "flat regions merged first, peaks preserved" but the formula `baseLoss / (ε + curvature)` does the opposite (already tracked in `fix/5-inverted-curvature-score-formula.md`). After formula fix, README formula will need updating. |
+| 7.2 | README usage examples compilable? | done | All six example blocks verified against current API signatures: constructor ✅, `add()` ✅, `quantileAt()`/`markerAt()`/`rankAt()`/`valueAt()`/`countAt()` ✅, `ascending()`/`descending()` with Criteria ✅, `peaks()` ✅, `mergeFrom()` ✅, `append(...centroids)` ✅. Return types and property accesses are all correct. |
+| 7.3 | "Limitations" section completeness | **gaps found** | README (:521-531) lists 4 limitations. **Missing:** (1) No NaN/Infinity input handling — `add(NaN)` corrupts B+Tree (tracked in `fix/5-nan-infinity-input-validation.md`). (2) No serialization API — must iterate and re-append; markers lost. (3) Iterator invalidation — mutations during iteration corrupt paths. (4) `mergeFrom(self)` is broken. These are user-facing hazards that should be documented. |
+| 7.4 | JSDoc on all public methods | **gaps found** | Missing `@throws` annotations: `valueAt()` throws "Rank out of range" (:257), `markerAt()` throws "Invalid marker" (:306), `maxCentroids` setter throws on value < 1 (:117), `append()` throws on count < 1 or variance < 0 (:169-171). `ascending()`/`descending()` `@param criteria` lacks detail on Criteria fields (markerIndex, value, quantile). |
+| 7.5 | Return type documentation for edge cases | **gaps found** | `valueAt()` JSDoc says "Returns the Quantile information" but doesn't mention the `@throws` for out-of-range rank. `markerAt()` same — no `@throws`. `add()` JSDoc doesn't mention NaN behavior. `countAt()` return description says "interpolated, but in whole counts" which is accurate. |
+| 7.6 | Complexity claims | done | README (:370-378) claims: `add()` O(log n), `quantileAt()` O(log n), `markerAt()` O(1), `mergeFrom()` O(m log n). All verified against implementation — B+Tree operations are O(log n), marker lookup is O(1). README also says "roughly O(log n)" in the summary section (:13) which is accurate. |
+| 7.7 | `doc/figures/` referenced? | **broken link + unreferenced image** | README :11 references `doc/complex-diagram.jpg` but the file is at `doc/figures/complex-diagram.jpg` — **broken image link**. `doc/figures/simple-diagram.jpg` exists but is **not referenced** anywhere in README. The three `.png` figures (`hist.png`, `spars.png`, `spars-compressed.png`) are correctly referenced at :159, :165, :173. |
+| 7.8 | Time-window aggregation | done | README :493-519 shows time-window aggregation as a **usage pattern** under "Distributed and Parallel Scenarios" — not a claimed feature. The code example is correct (uses standard Sparstogram API) and is clearly presented as a design pattern. **Not misleading.** |
+| 7.9 | Distributed merge guidance | **gaps found** | README :457-491 documents `mergeFrom()` for parallel/distributed use but omits critical caveats: (1) Markers in the source histogram are ignored — only the target's markers are updated. (2) Iterator invalidation — `mergeFrom(self)` is broken (tracked in `fix/4-merge-from-self-iterator-invalidation.md`). (3) Merge is not commutative due to weighted-median recentering — `merge(A,B)` may differ from `merge(B,A)`. Users building distributed aggregation should be warned about these. |
+| 7.10 | No CHANGELOG | done | Confirmed: no CHANGELOG.md exists. Version 0.9.5. No tracked history of breaking changes. Low priority for pre-1.0 library. |
+| 7.11 | ESM-only nature not documented | **gap found** | `package.json` has `"type": "module"` and exports only `./dist/index.js`. CJS consumers need `await import('sparstogram')`. Not mentioned in README. |
+| 7.12 | Node.js minimum version not documented | **gap found** | `tsconfig.json` targets ES2022 which requires Node.js >= 16.11. No `engines` field in `package.json`. Not mentioned in README. |
 
-**Follow-up tickets:** Reference figures in README or remove. Document marker loss during mergeFrom(). Add CHANGELOG.
+**Follow-up tickets:**
+- `fix/3-documentation-corrections.md` — Fix broken image path (:11), add missing `@throws` JSDoc annotations, add limitations for NaN/serialization/iterator invalidation, document ESM-only nature and Node.js minimum, document `mergeFrom()` caveats, reference or remove `simple-diagram.jpg`
 
 ---
 
