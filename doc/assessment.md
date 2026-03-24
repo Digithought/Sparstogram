@@ -342,15 +342,19 @@ When any code path calls `_losses.find(centroidEntry)`, it uses `centroidEntry.l
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 11.1 | `digitree` — maintenance status | | Single runtime dependency; verify last publish date, open issues, bus factor |
-| 11.2 | `digitree` — API stability | | B+Tree interface (find, insert, delete, ascending, descending, prior, next, at, updateAt); tightly coupled |
-| 11.3 | `digitree` — license | | Verify MIT or compatible |
-| 11.4 | `digitree` — known vulnerabilities | | Run `npm audit`; check advisories |
-| 11.5 | Dev dependency versions | | All at recent versions as of 2025; TypeScript 5.8, Mocha 11, Chai 5 |
-| 11.6 | `package-lock.json` committed? | | Verify presence in repo for reproducible builds |
-| 11.7 | `ts-node` + `--loader` ESM approach | | Known pain point; consider `tsx` or native TypeScript support (Node.js 22+) as alternative |
+| 11.1 | `digitree` — maintenance status | done | Same author (Nathan T. Allan) as sparstogram. Last publish **2026-01-22** (v1.4.6). 16 releases from 2024-02 to 2026-01. GitHub: 0 open issues, 7 stars, 1 fork. Bus factor: 1 — acceptable given shared authorship, but worth noting. Actively maintained. |
+| 11.2 | `digitree` — API stability | done | **85 call sites** across two `BTree` instances (`_centroids`, `_losses`). Uses: `find`, `insert`, `delete`, `ascending`, `descending`, `prior`, `next`, `first`, `last`, `at`, `updateAt`, `count`. Tight coupling is inherent — the B+Tree *is* the core data structure. Installed v1.4.0; latest is 1.4.6 (semver-minor, should be safe to update). |
+| 11.3 | `digitree` — license | done | **Apache-2.0**. Compatible with sparstogram's MIT license (Apache-2.0 is permissive; MIT consumers can depend on Apache-2.0 libraries without issue). |
+| 11.4 | `digitree` — known vulnerabilities | done | **No known vulnerabilities.** npm audit shows 12 advisories, but all are in transitive dev dependencies (eslint→minimatch, mocha→diff/serialize-javascript, rimraf→glob). Zero runtime vulnerabilities. |
+| 11.5 | Dev dependency versions | **note** | Several packages outdated. Within semver range: mocha 11.4→11.7.5, rimraf 6.0.1→6.1.3, typedoc 0.28.4→0.28.18, @typescript-eslint/* 8.32→8.57. **Breaking changes available:** TypeScript 5.8→6.0, ESLint 9→10, Chai 5→6. Recommend updating within semver range first; major bumps need separate evaluation. |
+| 11.6 | `package-lock.json` committed? | done | **Not committed.** For a library (not an application), this is standard practice — consumers use their own lock files. However, dev/CI reproducibility depends on npm registry state at install time. Consider committing for CI consistency. Already noted in R8 (8.11). |
+| 11.7 | `ts-node` + `--loader` ESM approach | done | Test script uses `node --loader=ts-node/esm`. The `--loader` flag is deprecated in Node.js 22+ (replaced by `--import` with `register()`). Alternatives: (a) `tsx` — drop-in replacement, actively maintained, faster; (b) Node.js 22+ native `--experimental-strip-types` — no loader needed but limited (no enums, no decorators). `tsx` is the pragmatic choice. Low urgency — current setup works. |
 
-**Follow-up tickets:** Run `npm audit`. Verify digitree health/maintenance. Consider tsx migration for test runner.
+**Follow-up tickets:**
+- *Recommended:* Update `digitree` from 1.4.0 to 1.4.6 — bug fixes and improvements from same author
+- *Recommended:* Run `npm audit fix` to resolve dev dependency advisories (12 total, all in dev transitive deps)
+- *Low priority:* Consider `tsx` migration for test runner to replace deprecated `--loader` flag
+- *Low priority:* Evaluate TypeScript 6.0, ESLint 10, Chai 6 major version upgrades
 
 ---
 
@@ -396,6 +400,9 @@ When any code path calls `_losses.find(centroidEntry)`, it uses `centroidEntry.l
 | **Low** | `peaks()` has dead `result` variable and `let` → `const` issues | R12 | 12.9, 12.10 |
 | **Low** | `doc/figures/` images not referenced in README | R7 | 7.7 |
 | **Low** | No test coverage for NaN, Infinity, stress scenarios | R5 | 5.1, 5.3 |
+| **Low** | 12 npm audit advisories in dev transitive deps (0 runtime) | R11 | 11.4 |
+| **Low** | `digitree` 1.4.0 installed, 1.4.6 available (semver-minor) | R11 | 11.2 |
+| **Low** | `ts-node --loader` deprecated in Node.js 22+ | R11 | 11.7 |
 
 ---
 
@@ -411,4 +418,4 @@ When any code path calls `_losses.find(centroidEntry)`, it uses `centroidEntry.l
 8. **R7** — Documentation accuracy pass; reference figures; add CHANGELOG
 9. **R6** — Add benchmarks; optimize peaks() ring buffers
 10. **R9** — Type export completeness; Criteria redesign
-11. **R11** — Dependency audit and health check
+11. **R11** — Dependency audit and health check (completed — no blocking issues; `digitree` actively maintained, zero runtime vulnerabilities, all audit findings in dev transitive deps)
