@@ -310,20 +310,21 @@ Scaling is sub-linear in maxCentroids — confirms O(log n) per add, with consta
 ### R9: Type Safety & TypeScript Strictness
 
 **Scope:** Audit TypeScript usage for correctness and exported type completeness.
+**Status:** done
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 9.1 | `as any` usage | | :687 — prototype binding uses `as any`; only occurrence; acceptable but hacky |
-| 9.2 | `Quantile` interface not exported | | Return type of `valueAt()`, `quantileAt()`, `markerAt()` — consumers see inferred structural type but can't name it |
-| 9.3 | `Marker` interface not exported | | Internal; `Quantile extends Marker` — OK since Marker is internal-only |
-| 9.4 | `CentroidEntry` leaks through iterators | | `ascending()`/`descending()` yield `Centroid` (declared return type); but actual objects are `CentroidEntry` with extra `loss` field — consumers could access `.loss` without type support |
-| 9.5 | `Criteria.quantile` typed as `Quantile` | | Requires a full `Quantile` object; would be more ergonomic as just `number` (0-1) — **inconsistent with `quantileAt(number)`** |
-| 9.6 | `_markers` nullability | | `(Marker \| undefined)[] \| undefined` — double-optional; handled correctly in code |
-| 9.7 | `markers` constructor param is `public` | | Exposes as instance property; frozen after construction; type is `number[] \| undefined` — OK |
-| 9.8 | Strict null checks | | Enabled; `!` assertions used after `.at(path)` — safe because guarded by `.on` checks |
-| 9.9 | Return type annotations | | Most methods have explicit return types; `append()` infers `number` — should be explicit |
+| 9.1 | `as any` usage | acceptable | :687 — prototype binding `(Sparstogram.prototype as any).edgeContribution = edgeContribution`; only cast in codebase. The private method at :428 already delegates to the helper, so the prototype override is redundant. Functional but fragile — could be eliminated by removing the prototype assignment and relying on the private method. |
+| 9.2 | `Quantile` interface not exported | **improvement needed** | Return type of `valueAt()`, `quantileAt()`, `markerAt()` — consumers see inferred structural type `{ rank: number; centroid: Centroid; offset: number; value: number }` but cannot name it in their own annotations. Should be exported. |
+| 9.3 | `Marker` interface not exported | OK | Internal; `Quantile extends Marker`; not in any public signature directly — only through `Quantile`. Keeping internal is correct. |
+| 9.4 | `CentroidEntry` leaks through iterators | **confirmed bug** | `ascending()`/`descending()` declare `IterableIterator<Centroid>` return type, but yield raw `CentroidEntry` objects with extra `loss` field. Consumers can access `.loss` at runtime without type support. Same leak in `valueAt()`/`quantileAt()`/`markerAt()` via the `centroid` field of the returned `Quantile`. Existing test confirms: "BUG: iterators expose internal loss field on centroids". Fix: strip `loss` before yielding (e.g. destructure). |
+| 9.5 | `Criteria.quantile` typed as `Quantile` | **improvement needed** | Requires a full `Quantile` object with `rank`, `centroid`, `offset`, `value` fields, but `criteriaToPath` only reads `criteria.quantile.centroid.value`. Inconsistent with `quantileAt(number)` which accepts a plain `number` (0-1). Accepting `number` instead of `Quantile` would be more ergonomic and consistent. |
+| 9.6 | `_markers` nullability | OK | `(Marker \| undefined)[] \| undefined` — double-optional is correct: outer `undefined` means no markers requested, inner `undefined` means marker not yet initialized (first value not added). All code paths handle both levels. |
+| 9.7 | `markers` constructor param is `public` | OK | Exposes as instance property; frozen after construction (`Object.freeze(markers)` at :106); type is `number[] \| undefined`. Read-only in practice. |
+| 9.8 | Strict null checks | OK | `strict: true` in tsconfig.json. All 35 `!` non-null assertions after `.at(path)` are preceded by `.on` guards or equivalent logic (e.g., iterator loop guarantees, prior `if (!path.on) return` guards). No unsafe assertions found. |
+| 9.9 | Return type annotations | minor | Most public methods have explicit return types. `append()` at :166 infers `number` — should be explicit for consistency with `add(): number`. The d.ts correctly shows `: number` regardless. |
 
-**Follow-up tickets:** Export `Quantile` type. Evaluate `Criteria.quantile` redesign to accept `number`.
+**Follow-up tickets:** `plan/3-export-quantile-strip-centroidentry.md` — export `Quantile`, strip `CentroidEntry.loss` from public API, evaluate `Criteria.quantile` redesign.
 
 ---
 
