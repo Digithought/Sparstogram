@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { Sparstogram, Centroid } from './sparstogram.js';
+import { Sparstogram, Centroid, edgeContribution } from './sparstogram.js';
 
 describe('Sparstogram', () => {
 	let sparstogram: Sparstogram;
@@ -1033,6 +1033,141 @@ describe('Edge Cases & Robustness', () => {
 			const s = new Sparstogram(10);
 			s.append({ value: 5, variance: 0, count: 1 });
 			expect(s.count).to.equal(1);
+		});
+	});
+
+	describe('numerical stability — variance=0 interpolation paths', () => {
+		it('rankAt between two zero-variance centroids does not produce NaN', () => {
+			const s = new Sparstogram(10);
+			s.add(10);
+			s.add(20);
+			// Both centroids have variance=0; query between them hits interpolateRank → normalCDF
+			// normalCDF with variance=0 and x != mean should return 0 or 1, not NaN
+			const rank = s.rankAt(15);
+			expect(rank).to.not.be.NaN;
+			expect(rank).to.be.at.least(1);
+			expect(rank).to.be.at.most(2);
+		});
+
+		it('rankAt just beyond a zero-variance centroid does not produce NaN', () => {
+			const s = new Sparstogram(10);
+			s.add(10);
+			// Single centroid, variance=0; query above hits inferRank → normalCDF
+			const rankAbove = s.rankAt(10.001);
+			expect(rankAbove).to.not.be.NaN;
+			expect(rankAbove).to.equal(1); // past the only value
+			const rankBelow = s.rankAt(9.999);
+			expect(rankBelow).to.not.be.NaN;
+			expect(rankBelow).to.equal(0); // before the only value
+		});
+
+		it('countAt between zero-variance centroids returns finite value', () => {
+			const s = new Sparstogram(10);
+			s.add(10);
+			s.add(20);
+			// calculateDensity with variance=0 guards for exact match; should return 0 between
+			const count = s.countAt(15);
+			expect(count).to.not.be.NaN;
+			expect(count).to.be.at.least(0);
+		});
+
+		it('rankAt with appended high-variance centroid neighbors a zero-variance centroid', () => {
+			const s = new Sparstogram(10);
+			s.append({ value: 10, variance: 0, count: 5 });
+			s.append({ value: 20, variance: 4, count: 10 });
+			// Mixed: one zero-variance, one nonzero; interpolation uses both CDFs
+			const rank = s.rankAt(15);
+			expect(rank).to.not.be.NaN;
+			expect(rank).to.be.at.least(5);
+			expect(rank).to.be.at.most(15);
+		});
+	});
+
+	describe('numerical stability — erf and normalCDF edge values', () => {
+		it('rankAt with very large value spread does not overflow or NaN', () => {
+			const s = new Sparstogram(10);
+			// erf(x) where x is very large: Math.exp(-x*x) underflows to 0 → erf=1
+			s.append({ value: 0, variance: 1, count: 100 });
+			s.append({ value: 1e15, variance: 1, count: 100 });
+			const rank = s.rankAt(5e14);
+			expect(rank).to.not.be.NaN;
+			expect(Number.isFinite(rank)).to.be.true;
+		});
+
+		it('rankAt near centroid with very small variance produces finite result', () => {
+			const s = new Sparstogram(10);
+			s.append({ value: 100, variance: 1e-20, count: 50 });
+			s.append({ value: 200, variance: 1e-20, count: 50 });
+			const rank = s.rankAt(150);
+			expect(rank).to.not.be.NaN;
+			expect(Number.isFinite(rank)).to.be.true;
+		});
+	});
+
+	describe('numerical stability — tightnessJ drift', () => {
+		it('tightnessJ stays close to recomputed value after 10K additions', () => {
+			const s = new Sparstogram(20);
+			// Add 10K values with some pattern to exercise add/compress paths
+			for (let i = 0; i < 10000; i++) {
+				s.add(Math.sin(i) * 1000);
+			}
+			// Recompute tightnessJ from iterator
+			let recomputed = 0;
+			let prev: import('./sparstogram.js').Centroid | null = null;
+			for (const c of s.ascending()) {
+				if (prev) recomputed += edgeContribution(prev, c);
+				prev = c;
+			}
+			const incremental = s.tightnessJ;
+			// Allow some floating-point drift, but should be within 1% relative error
+			// or within a small absolute tolerance for near-zero values
+			const absDiff = Math.abs(incremental - recomputed);
+			const relDenom = Math.max(Math.abs(recomputed), 1);
+			expect(absDiff / relDenom).to.be.lessThan(0.01,
+				`tightnessJ drift: incremental=${incremental}, recomputed=${recomputed}, diff=${absDiff}`);
+		});
+	});
+
+	describe('numerical stability — curvature score edge cases', () => {
+		it('compression with coincident-value centroids does not produce Infinity or NaN loss', () => {
+			const s = new Sparstogram(5);
+			// Many identical values → compressed centroids may have coincident values
+			for (let i = 0; i < 20; i++) s.add(42);
+			for (let i = 0; i < 20; i++) s.add(43);
+			// dens() uses epsilon 1e-12 to prevent div-by-zero for coincident values
+			expect(s.centroidCount).to.be.at.most(5);
+			// All queries should return finite results
+			expect(Number.isFinite(s.tightnessJ)).to.be.true;
+			expect(s.rankAt(42)).to.not.be.NaN;
+			expect(s.rankAt(42.5)).to.not.be.NaN;
+		});
+
+		it('score formula handles near-zero curvature without overflow', () => {
+			// Uniform distribution → curvature ≈ 0 → score = baseLoss / (1e-9 + ~0)
+			const s = new Sparstogram(5);
+			for (let i = 0; i < 100; i++) s.add(i);
+			// If score overflowed, compression would break
+			expect(s.centroidCount).to.be.at.most(5);
+			expect(s.count).to.equal(100);
+			// All centroids should have finite values
+			for (const c of s.ascending()) {
+				expect(Number.isFinite(c.value)).to.be.true;
+				expect(Number.isFinite(c.variance)).to.be.true;
+				expect(c.count).to.be.at.least(1);
+			}
+		});
+	});
+
+	describe('numerical stability — combineSharedMean edge cases', () => {
+		it('combining two count=1 centroids at same value gives variance=0', () => {
+			const s = new Sparstogram(1);
+			s.add(42);
+			s.add(42); // Increments existing, uses combineSharedMean: df=1
+			expect(s.centroidCount).to.equal(1);
+			const c = Array.from(s.ascending())[0];
+			expect(c.value).to.equal(42);
+			expect(c.variance).to.equal(0);
+			expect(c.count).to.equal(2);
 		});
 	});
 

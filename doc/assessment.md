@@ -53,18 +53,22 @@ All tickets live in `tickets/review/`. Findings from each review populate the se
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 2.1 | `erf()` A&S 7.1.26 approximation accuracy | | :695 — max error ~1.5e-7; adequate for histogram use but not documented |
-| 2.2 | `normalCDF()` with variance=0 | | :689 — `sqrt(0)` = 0, division by 0 in `erf()` argument → NaN propagation |
-| 2.3 | `inferValueFromOffset()` when count=1 | | :790 — guarded, returns `centroid.value`; OK |
-| 2.4 | `offsetToValue` scalar at boundaries | | :795 — `fraction = offset / (count - 1)` when offset=0 or offset=count-1 gives -1/+1 sigma; assumes uniform spacing |
-| 2.5 | `interpolateCentroids()` with zero-variance centroids | | :800 — calls `normalCDF` which will produce NaN if variance=0 (see 2.2) |
-| 2.6 | `calculateDensity()` variance=0 guard | | :829 — returns 1 if exact match, 0 otherwise; discontinuous but intentional |
-| 2.7 | `tightnessJ` incremental drift over many operations | | Floating-point addition ordering may cause drift; no periodic recomputation |
-| 2.8 | Very large values (>1e15) — `Math.exp(-x*x)` underflow in erf | | Produces 0 for large x, which makes erf=1; functionally OK |
-| 2.9 | NaN/Infinity input to `add()` | | No guard; NaN propagates silently through B+Tree ordering — **likely bug** |
-| 2.10 | `dens()` epsilon `1e-12` in denominator | | :421 — prevents division by zero for coincident values; adequate |
+| 2.1 | `erf()` A&S 7.1.26 approximation accuracy | done | :695 — max error ~1.5e-7; adequate for histogram use. Verified: erf(Infinity)=1, erf(NaN)=NaN. Test exercises very-large-spread case. |
+| 2.2 | `normalCDF()` with variance=0 | done | :689 — `sqrt(0)=0`, argument `(x-mean)/0`. When `x!=mean`: returns 0 or 1 (correct for point mass). When `x==mean`: NaN — but this path is guarded at all call sites by B+Tree `find()` exact-match check. Defense-in-depth: function-level guard recommended (see follow-up). Tests confirm no NaN via public API. |
+| 2.3 | `inferValueFromOffset()` when count=1 | done | :790 — guarded, returns `centroid.value`; OK |
+| 2.4 | `offsetToValue` scalar at boundaries | done | :795 — `fraction = offset / (count - 1)` when offset=0 or offset=count-1 gives -1/+1 sigma; assumes uniform spacing within 1-sigma. Correct for linear interpolation model. |
+| 2.5 | `interpolateCentroids()` with zero-variance centroids | done | :800 — calls `normalCDF` for both centroids. In practice, only reached when query value differs from both centroid means (guarded by `rankAt` exact-match check). Tests confirm: `rankAt` between two zero-variance centroids returns finite result, not NaN. |
+| 2.6 | `calculateDensity()` variance=0 guard | done | :829 — returns 1 if exact match, 0 otherwise; discontinuous but intentional and correct for point mass. |
+| 2.7 | `tightnessJ` incremental drift over many operations | done | Test added: 10K `sin(i)*1000` additions, compare incremental vs recomputed from iterator. Drift stays within 1% relative error. Acceptable for a monitoring heuristic. |
+| 2.8 | Very large values (>1e15) — `Math.exp(-x*x)` underflow in erf | done | Produces 0 for large x, which makes erf=1; functionally OK. Test confirms `rankAt` with 1e15 spread returns finite result. |
+| 2.9 | NaN/Infinity input to `add()` | **confirmed bug** | No guard; NaN propagates silently through B+Tree ordering. Already tracked in `fix/5-nan-infinity-input-validation.md`. |
+| 2.10 | `dens()` epsilon `1e-12` in denominator | done | :421 — prevents division by zero for coincident values; adequate. Test confirms compression of coincident-value centroids works without Infinity/NaN. |
+| 2.11 | `1e-9` epsilon in score formula | done | :403 — `baseLoss / (1e-9 + curvature)`. Near-zero curvature (uniform data) produces large but finite scores (~1e9×baseLoss). This is intentional — flat regions are preserved. Test confirms uniform distribution compresses correctly. |
+| 2.12 | `combineSharedMean()` with both counts=1 | done | :640 — denominator `count-1=1` when both are count=1. Variance terms are 0; result is 0. Test confirms. |
 
-**Follow-up tickets:** Add input validation for NaN/Infinity in `add()`. Add variance-zero guard in `interpolateCentroids()`.
+**Follow-up tickets:**
+- `fix/5-nan-infinity-input-validation.md` — add input validation for NaN/Infinity in `add()` (existing)
+- *Recommended*: Add variance=0 guard directly in `normalCDF()` as defense-in-depth (return 0.5 for x==mean, 0/1 for x!=mean). Low priority since all call sites are currently guarded.
 
 ---
 
