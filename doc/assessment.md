@@ -271,18 +271,22 @@ When any code path calls `_losses.find(centroidEntry)`, it uses `centroidEntry.l
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 8.1 | ESM-only package (`"type": "module"`) | | CJS consumers need dynamic `import()` — potential friction; not documented |
-| 8.2 | `exports` field lacks types condition | | :8-10 — no `"types"` condition in exports map; TypeScript resolves via `"types"` top-level field — works but not best practice |
-| 8.3 | Source maps in NPM package | | `.npmignore` includes `dist/` implicitly via allowing it; source maps ship — intentional? Adds ~28KB |
-| 8.4 | `prepublishOnly` runs `doc` generation | | TypeDoc output goes to `docs/`; this is in `.npmignore`? If not, ships unnecessary HTML |
-| 8.5 | No CI/CD pipeline | | No GitHub Actions, no automated test/build/publish verification |
-| 8.6 | ES2022 target compatibility | | Requires Node.js >= 16.11; not documented as minimum version |
-| 8.7 | `--loader=ts-node/esm` deprecation | | Node.js 20+ prefers `--import` flag; current loader API is deprecated and warns |
-| 8.8 | No `.npmignore` review | | Need to verify `.vscode/`, `doc/`, `docs/`, `src/` excluded from published package |
-| 8.9 | `tsconfig.build.json` vs `tsconfig.json` differences | | Build config excludes tests, enables declarations; base includes tests for IDE support — correct |
-| 8.10 | LICENSE file | | Verify MIT license file exists and is included in package |
+| 8.1 | ESM-only package (`"type": "module"`) | done | CJS consumers need dynamic `import()` — not documented in README. Acceptable for a modern library; should note in README or engines field. |
+| 8.2 | `exports` field lacks `types` condition | **fix recommended** | `package.json:8-10` — exports map is `{ ".": "./dist/index.js" }`. TypeScript resolves types via top-level `"types"` field (works), but `moduleResolution: "bundler"` and `"node16"` both prefer `exports["."].types`. Best practice: `{ ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } }`. Plan ticket created. |
+| 8.3 | Source maps in NPM package | **intentional, minor** | `tsconfig.json` has `"sourceMap": true`. Maps ship in package: `index.js.map` (123B) + `sparstogram.js.map` (28.7KB) = ~28.1KB total, 25% of unpacked size. Useful for debugging; acceptable for a library of this size. Could be stripped to reduce package size. |
+| 8.4 | `prepublishOnly` runs `doc` generation | done | `docs/` (TypeDoc HTML output) is correctly excluded from the published package. The `.npmignore` uses a deny-all (`*`) plus whitelist (`!dist/*`, `!LICENSE`, `!package.json`) strategy, so only whitelisted paths ship. `npm pack --dry-run` confirms: only `dist/*`, `LICENSE`, `README.md`, `package.json` are included. |
+| 8.5 | No CI/CD pipeline | **fix recommended** | No GitHub Actions or equivalent. Risk of publishing broken builds. Plan ticket created for CI setup. |
+| 8.6 | ES2022 target compatibility | **fix recommended** | `tsconfig.json` targets ES2022 which requires Node.js >= 16.11. Not documented in `package.json` `engines` field or README. Plan ticket created. |
+| 8.7 | `--loader=ts-node/esm` deprecation | **fix recommended** | `package.json:15` — test script uses `node --loader=ts-node/esm`. Node.js 20+ emits `ExperimentalWarning` and `DEP0180`. Node v24.2.0 (current) still works but the API is deprecated. Should migrate to `--import` flag or use `tsx`. Plan ticket created. |
+| 8.8 | `.npmignore` completeness | done | Strategy is deny-all + whitelist: `*` then `!dist/*`, `!LICENSE`, `!package.json`. This is robust — everything not explicitly whitelisted is excluded. Verified via `npm pack --dry-run`: 9 files total (LICENSE, README.md, 6 dist files, package.json). `.vscode/`, `doc/`, `docs/`, `src/`, `tickets/`, `tess/`, `test/` all correctly excluded. |
+| 8.9 | `tsconfig.build.json` vs `tsconfig.json` | done | Build config extends base, narrows `include` to `["src"]`, and excludes `**/*.test.*` and `./test`. Base includes `["src", "test"]` for IDE support. Build correctly produces only library code. Declarations enabled in base (`"declaration": true`), inherited by build. No test `.d.ts` files in dist. Correct. |
+| 8.10 | LICENSE file | done | MIT license file exists at project root (9.2KB). Included in NPM package (verified via `npm pack --dry-run`). |
+| 8.11 | `package-lock.json` | **note** | Not committed to git. For a library (not an application), this is acceptable — consumers use their own lock files. However, it means CI reproducibility depends on registry state at install time. Consider committing for reproducible dev/CI builds. |
+| 8.12 | Build pipeline correctness | done | `npm run build` succeeds cleanly. Produces 6 files in `dist/`: `index.js`, `index.d.ts`, `index.js.map`, `sparstogram.js`, `sparstogram.d.ts`, `sparstogram.js.map`. No test files leak into dist. 131 tests pass. |
 
-**Follow-up tickets:** Add CI pipeline (GitHub Actions). Add `types` condition to exports. Document Node.js minimum version. Verify .npmignore completeness.
+**Follow-up tickets:**
+- `plan/3-ci-pipeline.md` — Add GitHub Actions for test, build, and publish verification
+- `plan/3-packaging-improvements.md` — Add `types` condition to exports, document Node.js minimum version, migrate test runner off deprecated loader API
 
 ---
 
