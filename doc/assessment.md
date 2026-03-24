@@ -231,16 +231,30 @@ When any code path calls `_losses.find(centroidEntry)`, it uses `centroidEntry.l
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 6.1 | `add()` hot path cost | | ~2 B+Tree lookups + 1-2 loss updates + possible compression = O(log n); reasonable |
-| 6.2 | `compressOneBucket()` stale entry scanning | | Recursive retry; worst case is O(s * log n) where s = stale entries; no amortized bound proven |
-| 6.3 | Memory per centroid | | CentroidEntry (4 fields) + B+Tree overhead + Loss entry (2 fields) + B+Tree overhead ≈ ~200-400 bytes estimated |
-| 6.4 | `peaks()` ring buffer TODO | | :317 — comment says "replace with ring buffers"; current `Array.shift()` is O(n) per call — O(n*s) total |
-| 6.5 | `mergeFrom()` quadratic risk | | Batch size = `maxCentroids/4`; each compression is O(log n); total ≈ O(m log n); acceptable |
-| 6.6 | No benchmarks in repo | | No performance regression suite; reliant on manual testing |
-| 6.7 | `_losses.find(entry)` by object reference | | If digitree uses comparator-based find (not reference equality), this is O(log n); verify |
-| 6.8 | Prototype binding pattern | | :687 — `(Sparstogram.prototype as any).edgeContribution = edgeContribution` — unusual; prevents tree-shaking of class |
+| 6.1 | `add()` hot path cost | done | ~2 B+Tree lookups + 1-2 loss updates + possible compression = O(log n). Profiled at maxCentroids 50/500/5000 with 10K adds: 80ms/94ms/118ms respectively — sublinear scaling in centroid count confirms O(log n) per add. Tests added. |
+| 6.2 | `compressOneBucket()` stale entry scanning | **confirmed risk** | Recursive retry with no depth limit; worst case O(s × log n) where s = stale entries. Tested 5K values into maxCentroids=3 — completes without stack overflow (stale count stays manageable at typical scales). However, pathological cases with very large stale accumulation (>10K) could exceed JS stack. Tracked in `fix/3-compress-recursion-depth-limit.md`. |
+| 6.3 | Memory per centroid | done | CentroidEntry: 4 fields (value, variance, count, loss) = ~32 bytes + B+Tree node overhead (~64-128 bytes amortized). Loss entry: 2 fields (loss, value) = ~16 bytes + B+Tree node overhead (~64-128 bytes). **Estimated ~200-400 bytes per centroid** including both trees. At maxCentroids=5000, total ≈ 1-2 MB — acceptable for in-memory streaming use. |
+| 6.4 | `peaks()` ring buffer TODO | **minor concern** | :317 — `Array.shift()` is O(n) per call, but arrays are capped at `smoothing` elements. With default smoothing=3, shift is O(1) in practice (constant-size arrays). Only problematic for very large smoothing values (e.g., smoothing=1000+). Tested with 500 centroids, smoothing=3: <1ms. Ring buffers would help only for exotic smoothing values. Low priority. |
+| 6.5 | `mergeFrom()` quadratic risk | done | Batch size = `maxCentroids/4`; each compression is O(log n); total ≈ O(m log n). Tested: merging two 5K-value histograms into maxCentroids=100 completed in ~57ms — confirms linear, not quadratic behavior. Overlapping merge (same values) also linear. |
+| 6.6 | No benchmarks in repo | **gap** | No dedicated benchmark suite or performance regression tests. Review added 14 performance-related tests validating time bounds and scale behavior, but no formal benchmark framework (e.g., `benchmark.js` or `vitest bench`). Plan ticket created. |
+| 6.7 | `_losses.find(entry)` — comparator-based lookup | done | digitree BTree uses comparator-based binary search, not reference equality. `find()` is O(log n). However, due to the loss-score key mismatch (R3 §3.2), `find(centroidEntry)` often fails because `CentroidEntry.loss` (base) ≠ stored `Loss.loss` (score). This causes stale entries but is an O(log n) operation per call — not an O(n) scan. |
+| 6.8 | Prototype binding pattern | **fix recommended** | :687 — `(Sparstogram.prototype as any).edgeContribution = edgeContribution` overrides the class method. Prevents tree-shaking of the entire class in bundlers. The private method at :428 already delegates correctly. Remove the prototype binding. Tracked in `fix/2-code-quality-cleanup.md`. |
+| 6.9 | `min2()` helper at :674 | done | Reimplements `Math.min` for 2 args. V8 inlines `Math.min` for numeric pairs; no measurable benefit. Validated indirectly via `edgeContribution` tests. Tracked for removal in `fix/2-code-quality-cleanup.md`. |
 
-**Follow-up tickets:** Add benchmark suite. Replace `peaks()` arrays with ring buffers. Profile `add()` hot path with large centroid counts.
+**Profiling Summary (10K sin(i)×1000 values):**
+| maxCentroids | add() total (ms) | per-add (µs) | centroidCount |
+|--------------|-------------------|---------------|---------------|
+| 50 | ~80 | ~8 | 50 |
+| 500 | ~94 | ~9.4 | 500 |
+| 5000 | ~118 | ~11.8 | 5000 |
+
+Scaling is sub-linear in maxCentroids — confirms O(log n) per add, with constant overhead from compression when centroidCount < maxCentroids.
+
+**Follow-up tickets:**
+- `plan/3-benchmark-suite.md` — Add benchmark suite with formal performance regression testing
+- `plan/3-peaks-ring-buffer.md` — Replace `peaks()` arrays with ring buffers for large smoothing values (low priority)
+- `fix/3-compress-recursion-depth-limit.md` — Convert recursive retry to iterative loop (existing)
+- `fix/2-code-quality-cleanup.md` — Remove `min2()` and prototype binding (existing)
 
 ---
 

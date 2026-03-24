@@ -1588,3 +1588,146 @@ describe('Dual-Index Consistency', () => {
 		});
 	});
 });
+
+describe('Performance & Scalability', () => {
+
+	function assertConsistent(s: Sparstogram, label: string) {
+		const centroids = Array.from(s.ascending());
+		expect(s.centroidCount).to.equal(centroids.length,
+			`${label}: centroidCount should match actual centroid count from iterator`);
+		let totalCount = 0;
+		for (const c of centroids) totalCount += c.count;
+		expect(s.count).to.equal(totalCount,
+			`${label}: total count should equal sum of centroid counts`);
+		for (let i = 1; i < centroids.length; i++) {
+			expect(centroids[i].value).to.be.greaterThan(centroids[i - 1].value,
+				`${label}: centroids should be in ascending order at index ${i}`);
+		}
+	}
+
+	describe('add() at varying maxCentroids scales', () => {
+		for (const maxCentroids of [50, 500, 5000]) {
+			it(`add 10K values with maxCentroids=${maxCentroids} completes in reasonable time`, function () {
+				this.timeout(5000);
+				const s = new Sparstogram(maxCentroids);
+				const start = performance.now();
+				for (let i = 0; i < 10000; i++) s.add(Math.sin(i) * 1000);
+				const elapsed = performance.now() - start;
+				assertConsistent(s, `maxCentroids=${maxCentroids}`);
+				expect(s.count).to.equal(10000);
+				expect(s.centroidCount).to.be.at.most(maxCentroids);
+				// Sanity: should complete well within 5 seconds
+				expect(elapsed).to.be.lessThan(5000, `add 10K with maxCentroids=${maxCentroids} took ${elapsed}ms`);
+			});
+		}
+	});
+
+	describe('peaks() with large centroid count', () => {
+		it('peaks() with 500 centroids and smoothing=3 completes without O(n*s) blowup', function () {
+			this.timeout(5000);
+			const s = new Sparstogram(500);
+			for (let i = 0; i < 500; i++) s.add(i);
+			expect(s.centroidCount).to.equal(500);
+			const start = performance.now();
+			const peaks = Array.from(s.peaks(3));
+			const elapsed = performance.now() - start;
+			// Should complete very quickly — arrays of size 3 are O(1) for shift()
+			expect(elapsed).to.be.lessThan(1000, `peaks with 500 centroids took ${elapsed}ms`);
+			// Peaks should exist for this data
+			expect(peaks.length).to.be.greaterThan(0);
+		});
+
+		it('peaks() with large smoothing parameter on small dataset yields no peaks', () => {
+			const s = new Sparstogram(20);
+			for (let i = 0; i < 20; i++) s.add(i);
+			const peaks = Array.from(s.peaks(100));
+			expect(peaks.length).to.equal(0);
+		});
+	});
+
+	describe('mergeFrom() linearity — two large histograms', () => {
+		it('merging two 5K-value histograms is linear, not quadratic', function () {
+			this.timeout(10000);
+			const a = new Sparstogram(100);
+			const b = new Sparstogram(100);
+			for (let i = 0; i < 5000; i++) {
+				a.add(i);
+				b.add(i + 5000);
+			}
+			assertConsistent(a, 'histogram A before merge');
+			assertConsistent(b, 'histogram B before merge');
+			const start = performance.now();
+			a.mergeFrom(b);
+			const elapsed = performance.now() - start;
+			assertConsistent(a, 'after merge');
+			expect(a.count).to.equal(10000);
+			expect(a.centroidCount).to.be.at.most(100);
+			// Should complete well within timeout — linear O(m log n) not quadratic
+			expect(elapsed).to.be.lessThan(5000, `mergeFrom took ${elapsed}ms`);
+		});
+
+		it('merging overlapping histograms preserves count', function () {
+			this.timeout(10000);
+			const a = new Sparstogram(50);
+			const b = new Sparstogram(50);
+			for (let i = 0; i < 1000; i++) {
+				a.add(i);
+				b.add(i); // fully overlapping
+			}
+			a.mergeFrom(b);
+			expect(a.count).to.equal(2000);
+			assertConsistent(a, 'after overlapping merge');
+		});
+	});
+
+	describe('compressOneBucket stale entry handling at scale', () => {
+		it('1000 distinct values into maxCentroids=5 does not stack overflow', function () {
+			this.timeout(5000);
+			const s = new Sparstogram(5);
+			for (let i = 0; i < 1000; i++) s.add(i);
+			assertConsistent(s, 'after 1000 values');
+			expect(s.centroidCount).to.equal(5);
+			expect(s.count).to.equal(1000);
+		});
+
+		it('5000 distinct values into maxCentroids=3 handles stale entry accumulation', function () {
+			this.timeout(10000);
+			const s = new Sparstogram(3);
+			for (let i = 0; i < 5000; i++) s.add(i);
+			assertConsistent(s, 'after 5000 values into 3 centroids');
+			expect(s.centroidCount).to.equal(3);
+			expect(s.count).to.equal(5000);
+		});
+	});
+
+	describe('edgeContribution — exported function correctness', () => {
+		it('returns 0 when centroids have the same value', () => {
+			const result = edgeContribution({ value: 10, variance: 0, count: 5 }, { value: 10, variance: 0, count: 3 });
+			expect(result).to.equal(0);
+		});
+
+		it('returns min(count) * distance for differing values', () => {
+			const result = edgeContribution({ value: 10, variance: 0, count: 5 }, { value: 20, variance: 0, count: 3 });
+			expect(result).to.equal(3 * 10); // min(5,3) * |20-10|
+		});
+
+		it('handles count=1 centroids', () => {
+			const result = edgeContribution({ value: 0, variance: 0, count: 1 }, { value: 100, variance: 0, count: 1 });
+			expect(result).to.equal(100);
+		});
+
+		it('is symmetric', () => {
+			const a = { value: 5, variance: 1, count: 10 };
+			const b = { value: 15, variance: 2, count: 20 };
+			expect(edgeContribution(a, b)).to.equal(edgeContribution(b, a));
+		});
+	});
+
+	describe('min2 via edgeContribution — micro-optimization check', () => {
+		it('edgeContribution uses correct minimum for asymmetric counts', () => {
+			// This indirectly validates the min2 helper at line 674
+			const result = edgeContribution({ value: 0, variance: 0, count: 100 }, { value: 1, variance: 0, count: 1 });
+			expect(result).to.equal(1); // min(100,1) * |1-0| = 1
+		});
+	});
+});
