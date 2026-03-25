@@ -50,3 +50,5 @@ After fixing, update the BUG test to expect a throw (Option A) or verify correct
 - Add self-merge guard at the top of `mergeFrom()` at :188
 - Update the self-merge test to expect a throw
 - Verify all tests pass
+
+Developer feedback: Let's go with A

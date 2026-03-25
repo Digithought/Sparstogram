@@ -848,18 +848,11 @@ describe('Edge Cases & Robustness', () => {
 	});
 
 	describe('valueAt(0)', () => {
-		it('BUG: valueAt(0) produces offset=-1 (negative offset)', () => {
+		it('valueAt(0) throws because rank must be non-zero', () => {
 			const s = new Sparstogram(10);
 			s.add(5);
 			s.add(10);
-			// valueAt(0): Math.abs(0) = 0, first centroid count=1, 0 <= 1 is true
-			// offset = 0 - 1 = -1 (negative!)
-			// inferValueFromOffset(-1, centroid) with count=1 returns centroid.value (guarded)
-			// So the value is still reasonable, but the offset is wrong
-			const result = s.valueAt(0);
-			expect(result.offset).to.equal(-1); // Documents the bug: negative offset
-			// The value is still returned because inferValueFromOffset guards on count=1
-			expect(result.value).to.equal(5);
+			expect(() => s.valueAt(0)).to.throw('Rank must be non-zero');
 		});
 	});
 
@@ -957,14 +950,14 @@ describe('Edge Cases & Robustness', () => {
 
 		it('valueAt throws on empty histogram', () => {
 			const s = new Sparstogram(10);
-			expect(() => s.valueAt(0)).to.throw('Rank out of range');
+			expect(() => s.valueAt(0)).to.throw('Rank must be non-zero');
 			expect(() => s.valueAt(1)).to.throw('Rank out of range');
 		});
 
 		it('quantileAt throws on empty histogram', () => {
 			const s = new Sparstogram(10);
 			// quantileAt calls valueAt, which throws on empty
-			expect(() => s.quantileAt(0.5)).to.throw('Rank out of range');
+			expect(() => s.quantileAt(0.5)).to.throw();
 		});
 
 		it('ascending and descending yield nothing on empty histogram', () => {

@@ -237,6 +237,9 @@ export class Sparstogram {
 	 * @returns The Quantile information at the given rank in the histogram - always returns a positive rank
 	 */
 	valueAt(rank: number): Quantile {
+		if (rank === 0) {
+			throw new Error("Rank must be non-zero (positive for from-start, negative for from-end)");
+		}
 		let remainingRank = Math.abs(rank);
 		for (const path of rank >= 0
 			? this._centroids.ascending(this._centroids.first())

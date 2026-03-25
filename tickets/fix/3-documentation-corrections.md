@@ -8,10 +8,6 @@ Findings from review ticket `3-documentation-accuracy.md` (assessment R7). All i
 
 README line 11 references `doc/complex-diagram.jpg` but the file is at `doc/figures/complex-diagram.jpg`. This is a broken image in the rendered README on GitHub/npm.
 
-### Unreferenced Figure
-
-`doc/figures/simple-diagram.jpg` exists but is not referenced anywhere. Decision needed: either reference it in the README (e.g., alongside the complex diagram) or remove it from the repo.
-
 ### Missing @throws JSDoc Annotations
 
 These public methods throw but lack `@throws` documentation:
