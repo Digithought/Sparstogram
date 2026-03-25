@@ -625,10 +625,13 @@ export class Sparstogram {
 
 	private criteriaToPath(criteria?: Criteria): Path<number, CentroidEntry> | undefined {
 		if (criteria) {
-			if (criteria.markerIndex !== undefined && criteria.value !== undefined && criteria.quantile) {
+			const fieldCount = (criteria.markerIndex !== undefined ? 1 : 0)
+				+ (criteria.value !== undefined ? 1 : 0)
+				+ (criteria.quantile !== undefined ? 1 : 0);
+			if (fieldCount > 1) {
 				throw new Error("Only one of markerIndex, value, or quantile can be specified as criteria");
 			}
-			if (criteria.markerIndex === undefined && criteria.value === undefined && criteria.quantile === undefined) {
+			if (fieldCount === 0) {
 				throw new Error("Either markerIndex, value, or quantile must be specified as criteria");
 			}
 			return criteria.markerIndex !== undefined ? this._centroids.find(this.markerAt(criteria.markerIndex).centroid.value)

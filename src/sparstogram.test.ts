@@ -600,9 +600,11 @@ describe('Sparstogram Iterators', () => {
 		});
 
 		it('should not allow invalid criteria', () => {
-			expect(() => Array.from(sparstogram.ascending({})).map(c => c.value)).to.throw();	// neither
-			expect(() => Array.from(sparstogram.ascending({ value: 15, markerIndex: 0 })).map(c => c.value)).to.throw();	// both
-			expect(() => Array.from(sparstogram.ascending({ markerIndex: 0, quantile: sparstogram.valueAt(1) })).map(c => c.value)).to.throw();	// both
+			const s = new Sparstogram(10, [0.5]);
+			[10, 20, 5, 15, 25].forEach(v => s.add(v));
+			expect(() => Array.from(s.ascending({})).map(c => c.value)).to.throw();	// neither
+			expect(() => Array.from(s.ascending({ value: 15, markerIndex: 0 })).map(c => c.value)).to.throw();	// both
+			expect(() => Array.from(s.ascending({ markerIndex: 0, quantile: s.valueAt(1) })).map(c => c.value)).to.throw();	// both
 		});
 
 		it('should start at the specified value', () => {
@@ -658,33 +660,24 @@ describe('Sparstogram Iterators', () => {
 
 describe('API Surface Review', () => {
 	describe('Criteria validation — 2-of-3 rejection', () => {
-		// BUG: criteriaToPath (:625) only throws when ALL THREE fields are set.
-		// Two-of-three silently picks one based on precedence (markerIndex > quantile > value).
-		// These tests document the current (buggy) behavior; see fix ticket.
-		it('BUG: value + markerIndex does not throw (should reject)', () => {
+		it('rejects value + markerIndex', () => {
 			const s = new Sparstogram(10, [0.5]);
 			[10, 20, 5, 15, 25].forEach(v => s.add(v));
-			// Currently does NOT throw — markerIndex takes precedence silently
-			const values = Array.from(s.ascending({ value: 15, markerIndex: 0 })).map(c => c.value);
-			expect(values).to.deep.equal([15, 20, 25]); // uses markerIndex, ignores value
+			expect(() => Array.from(s.ascending({ value: 15, markerIndex: 0 }))).to.throw();
 		});
 
-		it('BUG: value + quantile does not throw (should reject)', () => {
+		it('rejects value + quantile', () => {
 			const s = new Sparstogram(10, [0.5]);
 			[10, 20, 5, 15, 25].forEach(v => s.add(v));
 			const q = s.valueAt(1);
-			// Currently does NOT throw — quantile takes precedence silently
-			const values = Array.from(s.ascending({ value: 15, quantile: q })).map(c => c.value);
-			expect(values).to.deep.equal([5, 10, 15, 20, 25]); // uses quantile (rank 1 = first), ignores value
+			expect(() => Array.from(s.ascending({ value: 15, quantile: q }))).to.throw();
 		});
 
-		it('BUG: markerIndex + quantile does not throw (should reject)', () => {
+		it('rejects markerIndex + quantile', () => {
 			const s = new Sparstogram(10, [0.5]);
 			[10, 20, 5, 15, 25].forEach(v => s.add(v));
 			const q = s.valueAt(1);
-			// Currently does NOT throw — markerIndex takes precedence silently
-			const values = Array.from(s.ascending({ markerIndex: 0, quantile: q })).map(c => c.value);
-			expect(values).to.deep.equal([15, 20, 25]); // uses markerIndex, ignores quantile
+			expect(() => Array.from(s.ascending({ markerIndex: 0, quantile: q }))).to.throw();
 		});
 
 		it('rejects all three together', () => {
