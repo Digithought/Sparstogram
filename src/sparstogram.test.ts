@@ -603,7 +603,7 @@ describe('Sparstogram Iterators', () => {
 			[10, 20, 5, 15, 25].forEach(v => s.add(v));
 			expect(() => Array.from(s.ascending({})).map(c => c.value)).to.throw();	// neither
 			expect(() => Array.from(s.ascending({ value: 15, markerIndex: 0 })).map(c => c.value)).to.throw();	// both
-			expect(() => Array.from(s.ascending({ markerIndex: 0, quantile: s.valueAt(1) })).map(c => c.value)).to.throw();	// both
+			expect(() => Array.from(s.ascending({ markerIndex: 0, quantile: 0.5 })).map(c => c.value)).to.throw();	// both
 		});
 
 		it('should start at the specified value', () => {
@@ -621,7 +621,7 @@ describe('Sparstogram Iterators', () => {
 		it('should start at quantile', () => {
 			sparstogram = new Sparstogram(10, [0.5]); // Median marker
 			[10, 20, 5, 15, 25].forEach(value => sparstogram.add(value));
-			const values = Array.from(sparstogram.ascending({ quantile: sparstogram.valueAt(4) })).map(c => c.value);
+			const values = Array.from(sparstogram.ascending({ quantile: 0.8 })).map(c => c.value);
 			expect(values).to.deep.equal([20, 25]);
 		});
 
@@ -668,22 +668,19 @@ describe('API Surface Review', () => {
 		it('rejects value + quantile', () => {
 			const s = new Sparstogram(10, [0.5]);
 			[10, 20, 5, 15, 25].forEach(v => s.add(v));
-			const q = s.valueAt(1);
-			expect(() => Array.from(s.ascending({ value: 15, quantile: q }))).to.throw();
+			expect(() => Array.from(s.ascending({ value: 15, quantile: 0.5 }))).to.throw();
 		});
 
 		it('rejects markerIndex + quantile', () => {
 			const s = new Sparstogram(10, [0.5]);
 			[10, 20, 5, 15, 25].forEach(v => s.add(v));
-			const q = s.valueAt(1);
-			expect(() => Array.from(s.ascending({ markerIndex: 0, quantile: q }))).to.throw();
+			expect(() => Array.from(s.ascending({ markerIndex: 0, quantile: 0.5 }))).to.throw();
 		});
 
 		it('rejects all three together', () => {
 			const s = new Sparstogram(10, [0.5]);
 			[10, 20, 5, 15, 25].forEach(v => s.add(v));
-			const q = s.valueAt(1);
-			expect(() => Array.from(s.ascending({ value: 15, markerIndex: 0, quantile: q }))).to.throw();
+			expect(() => Array.from(s.ascending({ value: 15, markerIndex: 0, quantile: 0.5 }))).to.throw();
 		});
 	});
 
@@ -1922,14 +1919,12 @@ describe('Remaining Error Paths', () => {
 			expect(() => Array.from(s.descending({ value: 1, markerIndex: 0 }))).to.throw('Only one of');
 		});
 
-		it('descending({value: 1, quantile: q}) throws "Only one of..."', () => {
-			const q = s.valueAt(1);
-			expect(() => Array.from(s.descending({ value: 1, quantile: q }))).to.throw('Only one of');
+		it('descending({value: 1, quantile: 0.5}) throws "Only one of..."', () => {
+			expect(() => Array.from(s.descending({ value: 1, quantile: 0.5 }))).to.throw('Only one of');
 		});
 
-		it('descending({markerIndex: 0, quantile: q}) throws "Only one of..."', () => {
-			const q = s.valueAt(1);
-			expect(() => Array.from(s.descending({ markerIndex: 0, quantile: q }))).to.throw('Only one of');
+		it('descending({markerIndex: 0, quantile: 0.5}) throws "Only one of..."', () => {
+			expect(() => Array.from(s.descending({ markerIndex: 0, quantile: 0.5 }))).to.throw('Only one of');
 		});
 	});
 

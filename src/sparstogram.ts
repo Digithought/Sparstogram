@@ -51,8 +51,8 @@ export interface Criteria {
 	markerIndex?: number;
 	/** The value to start at */
 	value?: number;
-	/** The quantile to start at */
-	quantile?: Quantile;
+	/** The quantile to start at (0-1, e.g. 0.5 for median) */
+	quantile?: number;
 }
 
 /** A histogram that maintains a complete or sparse approximation of the data frequency.
@@ -663,7 +663,7 @@ export class Sparstogram {
 				throw new Error("Either markerIndex, value, or quantile must be specified as criteria");
 			}
 			return criteria.markerIndex !== undefined ? this._centroids.find(this.markerAt(criteria.markerIndex).centroid.value)
-				: criteria.quantile ? this._centroids.find(criteria.quantile.centroid.value)
+				: criteria.quantile !== undefined ? this._centroids.find(this.quantileAt(criteria.quantile).centroid.value)
 					: this._centroids.find(criteria.value!);
 		}
 		return undefined;
