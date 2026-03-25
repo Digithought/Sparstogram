@@ -16,8 +16,9 @@
     "doc": "npx typedoc -out docs src",
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "test": "node --import tsx node_modules/mocha/bin/mocha.js src/**/*.test.ts --colors --bail",
+    "lint": "eslint src/",
     "bench": "node --import tsx src/sparstogram.bench.ts",
-    "prepublishOnly": "npm run build && npm run doc"
+    "prepublishOnly": "npm run lint && npm run build && npm run doc"
   },
   "repository": {
     "type": "git",

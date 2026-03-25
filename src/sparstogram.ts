@@ -101,7 +101,7 @@ export class Sparstogram {
 					throw new Error("Quantiles must be between 0 and 1.  e.g. 0.5 for median, 0.25 for quartiles, etc.");
 				}
 			});
-			this._markers = markers.map(q => undefined);
+			this._markers = markers.map(() => undefined);
 		}
 		Object.freeze(markers);
 		this.maxCentroids = Math.floor(maxCentroids);
@@ -339,7 +339,7 @@ export class Sparstogram {
 		const right = new Array<Centroid>();
 		let peak: Peak | undefined;
 		let trend = 1;
-		for (let path of this._centroids.ascending(this._centroids.first())) {
+		for (const path of this._centroids.ascending(this._centroids.first())) {
 			const entry = this._centroids.at(path)!;
 			right.push(entry);
 			if (right.length > smoothing) {
