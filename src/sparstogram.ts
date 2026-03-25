@@ -29,7 +29,7 @@ export interface Peak {
 	sum: number;
 }
 
-interface Marker {
+export interface Marker {
 	/** The rank of the value in the histogram */
 	rank: number;
 	/** The centroid at the quantile */
@@ -39,7 +39,7 @@ interface Marker {
 }
 
 /** Represents a quantile in the histogram. */
-interface Quantile extends Marker {
+export interface Quantile extends Marker {
 	/** Approximate value represented by the offset / count */
 	value: number;
 }

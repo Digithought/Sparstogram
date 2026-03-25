@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { Sparstogram, Centroid, edgeContribution } from './sparstogram.js';
+import { Sparstogram, Centroid, Quantile, Marker, edgeContribution } from './sparstogram.js';
 
 describe('Sparstogram', () => {
 	let sparstogram: Sparstogram;
@@ -1695,6 +1695,25 @@ describe('Performance & Scalability', () => {
 			const a = { value: 5, variance: 1, count: 10 };
 			const b = { value: 15, variance: 2, count: 20 };
 			expect(edgeContribution(a, b)).to.equal(edgeContribution(b, a));
+		});
+	});
+
+	describe('Quantile and Marker type exports', () => {
+		it('should allow Quantile and Marker to be used as type annotations', () => {
+			const hist = new Sparstogram(10);
+			for (let i = 1; i <= 20; i++) hist.add(i);
+
+			const q: Quantile = hist.valueAt(1);
+			expect(q).to.have.property('value');
+			expect(q).to.have.property('rank');
+			expect(q).to.have.property('centroid');
+			expect(q).to.have.property('offset');
+
+			// Marker is the base of Quantile; a Quantile is assignable to Marker
+			const m: Marker = hist.quantileAt(0.5);
+			expect(m).to.have.property('rank');
+			expect(m).to.have.property('centroid');
+			expect(m).to.have.property('offset');
 		});
 	});
 
