@@ -1908,28 +1908,26 @@ describe('Remaining Error Paths', () => {
 	});
 
 	describe('descending() invalid criteria', () => {
-		it('descending({}) throws "Either markerIndex, value, or quantile must be specified"', () => {
-			const s = new Sparstogram(10, [0.5]);
+		let s: Sparstogram;
+		beforeEach(() => {
+			s = new Sparstogram(10, [0.5]);
 			[10, 20, 30].forEach(v => s.add(v));
+		});
+
+		it('descending({}) throws "Either markerIndex, value, or quantile must be specified"', () => {
 			expect(() => Array.from(s.descending({}))).to.throw('Either markerIndex, value, or quantile must be specified');
 		});
 
 		it('descending({value: 1, markerIndex: 0}) throws "Only one of..."', () => {
-			const s = new Sparstogram(10, [0.5]);
-			[10, 20, 30].forEach(v => s.add(v));
 			expect(() => Array.from(s.descending({ value: 1, markerIndex: 0 }))).to.throw('Only one of');
 		});
 
 		it('descending({value: 1, quantile: q}) throws "Only one of..."', () => {
-			const s = new Sparstogram(10, [0.5]);
-			[10, 20, 30].forEach(v => s.add(v));
 			const q = s.valueAt(1);
 			expect(() => Array.from(s.descending({ value: 1, quantile: q }))).to.throw('Only one of');
 		});
 
 		it('descending({markerIndex: 0, quantile: q}) throws "Only one of..."', () => {
-			const s = new Sparstogram(10, [0.5]);
-			[10, 20, 30].forEach(v => s.add(v));
 			const q = s.valueAt(1);
 			expect(() => Array.from(s.descending({ markerIndex: 0, quantile: q }))).to.throw('Only one of');
 		});
