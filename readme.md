@@ -95,15 +95,15 @@ This approximates the second derivative of the empirical CDF at the seam between
 The score used to prioritize merge candidates is:
 
 ```
-score = baseLoss / (ε + curvature)
+score = baseLoss * (ε + curvature)
 ```
 
 Where:
 - **baseLoss** = weighted distance between centroids plus combined variance
-- **ε** = small constant (1e-9) to prevent division by zero
+- **ε** = small constant (1e-9) to prevent the score from being exactly zero
 - **curvature** = local CDF curvature estimate
 
-**Lower scores** (flat regions with high loss, or high-curvature regions with any loss) are merged first. **Higher scores** (high-curvature regions) are preserved longer.
+**Lower scores** (flat regions with low curvature) are merged first. **Higher scores** (high-curvature regions like peaks and tails) are preserved longer.
 
 This means:
 - Pairs in flat distribution regions (low curvature) get merged early

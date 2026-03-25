@@ -400,7 +400,7 @@ export class Sparstogram {
 	// We approximate a local CDF curvature near the seam (prior, current) using
 	// density differences on the left and right: |dens(l,prior) - dens(prior,curr)|
 	// and |dens(prior,curr) - dens(curr,r)|.  The score used in _losses is:
-	//   score = baseLoss / (eps + 0.5*(leftCurv + rightCurv))
+	//   score = baseLoss * (eps + 0.5*(leftCurv + rightCurv))
 	// This cheaply preserves bends (peaks/tails) while keeping operations local.
 	private getPriorScore(path: Path<number, CentroidEntry>, newCentroid: Centroid): number {
 		const prior = this._centroids.prior(path);
@@ -413,7 +413,7 @@ export class Sparstogram {
 		const l = lpath.on ? this._centroids.at(lpath)! : undefined;
 		const r = rpath.on ? this._centroids.at(rpath)! : undefined;
 		const curv = this.localCurvature(l, a, b, r);
-		return base / (SCORE_EPSILON + curv);
+		return base * (SCORE_EPSILON + curv);
 	}
 
 	private updateNextScore(path: Path<number, CentroidEntry>, newCentroid: Centroid): number {
@@ -427,7 +427,7 @@ export class Sparstogram {
 		const l = lpath.on ? this._centroids.at(lpath)! : undefined;
 		const r = rpath.on ? this._centroids.at(rpath)! : undefined;
 		const curv = this.localCurvature(l, a, b, r);
-		return base / (SCORE_EPSILON + curv);
+		return base * (SCORE_EPSILON + curv);
 	}
 
 	private localCurvature(l: Centroid | undefined, a: Centroid, b: Centroid, r: Centroid | undefined): number {

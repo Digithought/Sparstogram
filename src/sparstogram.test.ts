@@ -1106,7 +1106,7 @@ describe('Edge Cases & Robustness', () => {
 		});
 
 		it('score formula handles near-zero curvature without overflow', () => {
-			// Uniform distribution → curvature ≈ 0 → score = baseLoss / (1e-9 + ~0)
+			// Uniform distribution → curvature ≈ 0 → score = baseLoss * (1e-9 + ~0)
 			const s = new Sparstogram(5);
 			for (let i = 0; i < 100; i++) s.add(i);
 			// If score overflowed, compression would break
@@ -1208,10 +1208,9 @@ describe('Algorithm Correctness — Curvature-Aware Compression', () => {
 	});
 
 	describe('compression quality — uniform distribution', () => {
-		it('uniform distribution compresses with reasonable balance when loss index is consistent', () => {
-			// With correct _losses index (score stored in CentroidEntry.loss),
-			// compression picks pairs by true curvature-aware score, yielding
-			// more balanced centroids than the prior buggy behavior.
+		it('uniform distribution compresses with roughly balanced centroids', () => {
+			// With the corrected multiplication formula, flat regions (low curvature)
+			// get low scores and merge first, producing roughly balanced centroids.
 			const s = new Sparstogram(5);
 			for (let i = 0; i < 100; i++) s.add(i);
 			const centroids = Array.from(s.ascending());
@@ -1220,9 +1219,9 @@ describe('Algorithm Correctness — Curvature-Aware Compression', () => {
 			const maxCount = Math.max(...centroids.map(c => c.count));
 			const minCount = Math.min(...centroids.map(c => c.count));
 			// With 100 values in 5 centroids, ideal would be ~20 each.
-			// Ratio should be much less extreme than before the fix (was >10).
-			expect(maxCount / minCount).to.be.lessThan(50,
-				'Uniform distribution should not have extreme asymmetry with correct loss index');
+			// Corrected formula should produce a modest ratio.
+			expect(maxCount / minCount).to.be.lessThan(10,
+				'Uniform distribution should produce roughly balanced centroids');
 		});
 	});
 
@@ -1254,19 +1253,20 @@ describe('Algorithm Correctness — Curvature-Aware Compression', () => {
 	});
 
 	describe('score formula direction (documentation vs behavior)', () => {
-		it('README claims flat regions merge first, but edges merge first for uniform data', () => {
-			// If scoring preserved peaks/tails (as documented), a uniform distribution
-			// would be compressed roughly evenly (no peaks or tails to preserve).
-			// Instead, the edge-pair fallback curvature makes edges merge first.
+		it('flat regions merge first, edges are preserved for uniform data', () => {
+			// With corrected formula, uniform data has no peaks/tails to preserve,
+			// so compression is roughly even. Edge pairs get higher curvature from
+			// the fallback, giving them higher scores → preserved longer.
 			const s = new Sparstogram(10);
 			for (let i = 0; i < 50; i++) s.add(i);
 			const centroids = Array.from(s.ascending());
 
-			// Document: the leftmost centroid tends to absorb many values
-			// because edge pairs have low scores and get merged repeatedly
-			const leftmostCount = centroids[0].count;
-			expect(leftmostCount).to.be.greaterThan(1,
-				'Leftmost centroid absorbs multiple values due to edge-first merging');
+			// Edge centroids should NOT absorb extreme numbers of values;
+			// the distribution across centroids should be reasonable
+			const maxCount = Math.max(...centroids.map(c => c.count));
+			const minCount = Math.min(...centroids.map(c => c.count));
+			expect(maxCount / minCount).to.be.lessThan(20,
+				'Uniform data should not produce extreme centroid imbalance');
 		});
 	});
 
@@ -1304,7 +1304,7 @@ describe('Algorithm Correctness — Curvature-Aware Compression', () => {
 			const loss = s.add(30);
 			expect(loss).to.be.greaterThan(0);
 			// Loss should be a reasonable value, not the curvature-adjusted score
-			// Score can be enormous (baseLoss / 1e-9) for flat regions
+			// Score is baseLoss * (eps + curvature), which stays modest
 			expect(loss).to.be.lessThan(1e6,
 				'Returned loss should be base loss, not curvature-adjusted score');
 		});
