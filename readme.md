@@ -8,29 +8,30 @@ This Typescript library provides a sophisticated data structure for efficiently 
 
 Sparstogram is a histogram that maintains a complete or sparse approximation of the data frequency.  The representation will be complete if the number of distinct values is less than or equal to the `maxCentroids`.  Otherwise, the values will be compressed to a smaller number of centroids in a way that intelligently minimizes loss while preserving distribution features like peaks and tails.  The histogram can also maintain a set of quantiles, which are maintained with each new value (e.g. median can be efficiently maintained).  The structure is adaptive in range and resolution, and can be used for streaming or large data digests.
 
-![Histogram vs Sparstogram](doc/figures/complex-diagram.jpg)
+Histogram vs Sparstogram
 
 The implementation uses B+Trees to efficiently maintain the centroids and their priority scores, which is a self-balancing structure that scales efficiently.  As the number of unique data values grows beyond the configured `maxCentroids`, the loss returned from the `add` method will begin to be non-zero and represents how well the data compresses.  If and when this loss grows over some threshold, the user can choose to increase the `maxCentroids` value to maintain higher accuracy.  On the other hand, `maxCentroids` can be dynamically shrunk to reduce memory, at the expense of more approximation.
 
 The compression algorithm uses a **curvature-aware scoring system** that preferentially preserves regions where the empirical cumulative distribution function (CDF) bends sharply—such as peaks, valleys, and distribution tails—rather than simply merging the closest pairs. This approach is inspired by optimal k-point discrete approximations and Wasserstein-1 (Earth Mover's Distance) minimizing quantizers.
 
 ### Features:
-* **Lossy or lossless** - depending on configured `maxCentroids`
-* **Curvature-aware compression** - intelligently preserves peaks, valleys, and tails in the distribution
-* **Adaptive** - works on any numerical scale, rescales dynamically
-* **Resizable** - `maxCentroids` can be dynamically adjusted up or down
-* **Reports loss** continually as items are added; allowing dynamic growth to reduce loss
-* **Tightness metric** - provides a Wasserstein-1 proxy for monitoring compression quality
-* **Quantile markers** - maintain relative rank points without re-scanning
-  * Allows efficient maintenance of median, 95th percentile, etc. without traversal
-* **Helper functions** - computed operations for finding rank by value, count by value, value by rank, value by quantile
-* **Rank interpolation** - interpolates the rank between and beyond each centroid using variances in a normal distribution
-* **Detailed quantile information** - includes: centroid, variance, count, rank, and offset within bucket
-* **Histogram merging** - including maintaining variances, with batch compression optimization
-* **Peaks** - computes local maxima with average window smoothing, for use in frequency detection or clustering
-* **Directional iteration** of centroid buckets from the ends, a marker, a value, or by loss
-* **Compact** - only allocates memory for actual distinct values
-* **Scalable** - uses in-memory B+Trees ([Digitree](https://github.com/Digithought/Digitree)) which are fast and balanced
+
+- **Lossy or lossless** - depending on configured `maxCentroids`
+- **Curvature-aware compression** - intelligently preserves peaks, valleys, and tails in the distribution
+- **Adaptive** - works on any numerical scale, rescales dynamically
+- **Resizable** - `maxCentroids` can be dynamically adjusted up or down
+- **Reports loss** continually as items are added; allowing dynamic growth to reduce loss
+- **Tightness metric** - provides a Wasserstein-1 proxy for monitoring compression quality
+- **Quantile markers** - maintain relative rank points without re-scanning
+  - Allows efficient maintenance of median, 95th percentile, etc. without traversal
+- **Helper functions** - computed operations for finding rank by value, count by value, value by rank, value by quantile
+- **Rank interpolation** - interpolates the rank between and beyond each centroid using variances in a normal distribution
+- **Detailed quantile information** - includes: centroid, variance, count, rank, and offset within bucket
+- **Histogram merging** - including maintaining variances, with batch compression optimization
+- **Peaks** - computes local maxima with average window smoothing, for use in frequency detection or clustering
+- **Directional iteration** of centroid buckets from the ends, a marker, a value, or by loss
+- **Compact** - only allocates memory for actual distinct values
+- **Scalable** - uses in-memory B+Trees ([Digitree](https://github.com/Digithought/Digitree)) which are fast and balanced
 
 ### Why software developers should use histograms more
 
@@ -44,12 +45,12 @@ In performance optimization, system monitoring, and distributed systems, histogr
 
 Sparstogram is inspired by the paper "Approximate Frequency Counts over Data Streams" by Gurmeet Singh Manku and Rajeev Motwani. Though similar in spirit, this implementation incorporates several sophisticated enhancements:
 
-* **B+Tree data structures** for maintaining centroids and their priority scores, facilitating efficient scaling and automatic balancing
-* **Variance tracking** within each centroid to facilitate more accurate interpolation and loss estimates
-* **Dual indexing** - centroids ordered by value and by compression priority score, enabling O(1) access to the best merge candidate
-* **Curvature-aware scoring** that preserves distribution features by considering local CDF geometry
-* **Tightness metric** for monitoring approximation quality in terms of Wasserstein-1 distance
-* **Persisted quantile markers** allowing determination of specific percentiles without scanning
+- **B+Tree data structures** for maintaining centroids and their priority scores, facilitating efficient scaling and automatic balancing
+- **Variance tracking** within each centroid to facilitate more accurate interpolation and loss estimates
+- **Dual indexing** - centroids ordered by value and by compression priority score, enabling O(1) access to the best merge candidate
+- **Curvature-aware scoring** that preserves distribution features by considering local CDF geometry
+- **Tightness metric** for monitoring approximation quality in terms of Wasserstein-1 distance
+- **Persisted quantile markers** allowing determination of specific percentiles without scanning
 
 ### Core Data Structure
 
@@ -59,6 +60,7 @@ The Sparstogram maintains centroids in two B+Tree indices:
 2. **Priority queue (`_losses`)**: Maintains centroid pairs sorted by their compression score, allowing O(1) identification of the best pair to merge
 
 Each centroid stores:
+
 - **value**: The mean value of all data points merged into this centroid
 - **count**: The number of data points represented
 - **variance**: The spread of values within the centroid (0 for uncompressed points)
@@ -73,6 +75,7 @@ When the number of centroids exceeds `maxCentroids`, the algorithm must merge ad
 Rather than simply merging the closest pairs (which would smooth out peaks and tails), Sparstogram uses a **curvature-aware scoring system** inspired by optimal transport theory and data-aware discretization methods.
 
 The key insight is that the empirical CDF should be approximated more finely where it "bends" sharply (high curvature) and can tolerate coarser approximation in flat regions (low curvature). This is analogous to:
+
 - **DAUD (Data-Aware Uniform Discretization)**: k-point approximations that minimize KL divergence or Wasserstein distance
 - **Adaptive quantization**: Used in signal processing and image compression to allocate bits where they matter most
 - **Divide-and-conquer quantization**: Merge-stable approaches with W1 error guarantees
@@ -99,6 +102,7 @@ score = baseLoss * (ε + curvature)
 ```
 
 Where:
+
 - **baseLoss** = weighted distance between centroids plus combined variance
 - **ε** = small constant (1e-9) to prevent the score from being exactly zero
 - **curvature** = local CDF curvature estimate
@@ -106,6 +110,7 @@ Where:
 **Lower scores** (flat regions with low curvature) are merged first. **Higher scores** (high-curvature regions like peaks and tails) are preserved longer.
 
 This means:
+
 - Pairs in flat distribution regions (low curvature) get merged early
 - Pairs at peaks, valleys, and tails (high curvature) are preserved
 - The algorithm naturally adapts to the distribution shape
@@ -139,6 +144,7 @@ tightnessJ = Σ min(count_i, count_{i+1}) × |value_{i+1} - value_i|
 ```
 
 This metric:
+
 - **Correlates with W1 drift**: Approximates the transport cost of the discretized distribution
 - **Units**: count × value-units (e.g., if counting milliseconds, units are count·ms)
 - **Interpretation**: Lower = tighter/less spread; higher = looser/more separation
@@ -152,17 +158,18 @@ Note that `tightnessJ` is a heuristic approximation, not an exact W1 distance. I
 In a typical representation of a histogram, values are evenly spaced.  Really, each value represents a range of values that are grouped.  For instance, if the values are 4ms, 5ms, and 6ms; in reality each bucket represents an interval (3.4ms-4.5ms, 4.5ms-5.5ms, ...).
 
 In computers, histograms are typically represented with an array, where every element represents the count in that range (or "entry").  There are a few noteworthy suppositions:
-* The range is explicitly defined beforehand
-* The resolution (breadth of each entry) is also explicitly defined beforehand
-* All entries are stored, regardless of whether they are used (non-zero)
 
-![typical histogram](doc/figures/hist.png)
+- The range is explicitly defined beforehand
+- The resolution (breadth of each entry) is also explicitly defined beforehand
+- All entries are stored, regardless of whether they are used (non-zero)
+
+typical histogram
 
 ### Sparstogram Representation
 
 In a Sparstogram, no entries are stored until they are added, and no range is maintained between entries (AKA centroids) holding unused space.  The same histogram information as above is represented in a Sparstogram as only the three ordered entries having counts:
 
-![sparstogram](doc/figures/spars.png)
+sparstogram
 
 Unlike the traditional representation, the Sparstogram dynamically adapts itself in entries, resolution and range.  A limit can be imposed on a Sparstogram through `maxCentroids`.  Once that number of unique values has been reached, additional entries will result in compression so as not to exceed that many entries.  
 
@@ -170,14 +177,13 @@ Compression involves merging two adjacent entries into one, with a new value (at
 
 Here is an illustration of the same Sparstogram, were we to set `maxCentroids` to 2, thus asking it to shrink to only 2 entries:
 
-![sparstogram](doc/figures/spars-compressed.png)
+sparstogram
 
 Note that the weighted mean information is preserved through the count-weighted centroid values, while distribution shape information is captured through variance.  To reduce the amount of distribution information lost, a variance is computed to capture the notion that the entry has "spread" and is no longer a point.  The `countAt`, `rankAt`, and other accessor methods will interpolate based on that variance, assuming a normal distribution.  As a result, though the true distribution is lost in the compression, the general effect of there being multiple entries is preserved, and important distribution features (like modes) are preferentially retained by the curvature-aware compression algorithm.
 
 ### What do I do with this?
 
 Create an instance with a `maxCentroids` budget, and feed is some information.  Time spent per User Interface, financial data, pixel brightnesses, audio samples, whatever.  The result will the the frequency of each value, which you can use to make judgements from.  You can maintain the median over a streaming dataset, for instance, or compute the 75th percentile of something to discover outliers or eliminate noise.
-
 
 ## Installation
 
@@ -383,21 +389,25 @@ This places Sparstogram in the family of **streaming algorithms** and **online a
 
 #### Comparison to Other Streaming Quantile Algorithms
 
-| Algorithm | Space | Query Time | Update Time | Accuracy |
-|-----------|-------|------------|-------------|----------|
-| Sparstogram | O(k) | O(log k) | O(log k) | Curvature-adaptive |
-| t-digest | O(k) | O(k) | O(log k) | Quantile-adaptive |
-| Q-digest | O(log u) | O(log u) | O(log u) | Uniform error |
-| GK (Greenwald-Khanna) | O(1/ε log εn) | O(log 1/ε) | O(log 1/ε) | ε-approximate |
-| KLL sketch | O(1/ε log n) | O(1) | O(1) amortized | ε-approximate |
+
+| Algorithm             | Space         | Query Time | Update Time    | Accuracy           |
+| --------------------- | ------------- | ---------- | -------------- | ------------------ |
+| Sparstogram           | O(k)          | O(log k)   | O(log k)       | Curvature-adaptive |
+| t-digest              | O(k)          | O(k)       | O(log k)       | Quantile-adaptive  |
+| Q-digest              | O(log u)      | O(log u)   | O(log u)       | Uniform error      |
+| GK (Greenwald-Khanna) | O(1/ε log εn) | O(log 1/ε) | O(log 1/ε)     | ε-approximate      |
+| KLL sketch            | O(1/ε log n)  | O(1)       | O(1) amortized | ε-approximate      |
+
 
 Where:
+
 - k = number of centroids (user-controlled)
 - u = universe size (range of possible values)
 - ε = error parameter
 - n = number of items seen
 
 **Sparstogram's advantages**:
+
 - User controls exact memory budget via `maxCentroids`
 - Preserves peaks and multimodal structure (not just quantiles)
 - Maintains full distribution approximation, not just quantiles
@@ -405,6 +415,7 @@ Where:
 - Provides loss feedback for dynamic memory adjustment
 
 **Trade-offs**:
+
 - No formal ε-approximation guarantee (though tightnessJ provides heuristic)
 - Query time is O(log k) vs O(1) for some sketches
 - Better suited for understanding distribution shape than pure quantile estimation
@@ -425,6 +436,7 @@ combined_variance = (SS_a + SS_b + SS_between) / (count_a + count_b - 1)
 ```
 
 This properly accounts for:
+
 - Within-group variance (SS_a, SS_b)
 - Between-group variance (SS_between)
 - Degrees of freedom
@@ -439,11 +451,13 @@ CDF(x) = 0.5 × (1 + erf((x - μ) / (σ√2)))
 ```
 
 This allows:
+
 - **Smooth interpolation** between and beyond centroids
 - **Reasonable extrapolation** for values outside the observed range
 - **Count estimation** at arbitrary values
 
 The normal distribution assumption is a simplification, but works well in practice:
+
 - For uncompressed centroids (variance = 0), it degenerates to a point mass
 - For compressed centroids, it provides a unimodal, symmetric approximation
 - The curvature-aware compression tries to keep similar-shaped regions together
@@ -451,6 +465,7 @@ The normal distribution assumption is a simplification, but works well in practi
 #### Alternative Approaches
 
 Other approaches to interpolation include:
+
 - **Linear interpolation**: Simpler but less accurate, especially for counts
 - **Piecewise constant**: Assumes uniform distribution within each centroid
 - **Spline interpolation**: More flexible but requires more computation
@@ -497,7 +512,7 @@ Each merge operation is efficient and the variance tracking ensures accuracy is 
 #### Merge Caveats
 
 - **Quantile markers from source are ignored**: Only the target histogram's markers are updated during merge.
-- **`mergeFrom(self)` is not supported**: Self-merge causes iterator invalidation during mutation. Collect centroids into an array via `ascending()` and use `append()` instead.
+- `**mergeFrom(self)` is not supported**: Self-merge causes iterator invalidation during mutation. Collect centroids into an array via `ascending()` and use `append()` instead.
 - **Merge is not commutative**: Weighted-median recentering means `a.mergeFrom(b)` may produce slightly different results than `b.mergeFrom(a)`.
 
 #### Time-Window Aggregation
@@ -533,35 +548,22 @@ function getHourlyAggregate(hour: number) {
 #### Current Limitations
 
 1. **No formal error bounds**: Unlike GK or KLL, Sparstogram doesn't provide formal ε-approximation guarantees. The `tightnessJ` metric is heuristic.
-
 2. **Normal distribution assumption**: Interpolation assumes normality, which may not hold for all data patterns.
-
 3. **Local curvature only**: The curvature metric uses only immediate neighbors, which may miss global structure.
-
 4. **Single dimension**: Currently handles univariate data only (though could be extended to multiple independent histograms).
-
 5. **Iterator invalidation**: The `ascending()` and `descending()` generators yield lazily from internal B+Tree paths. Mutating the histogram during iteration (via `add()`, `append()`, `mergeFrom()`, or the `maxCentroids` setter) invalidates the iterator and may produce incorrect results or errors.
-
 6. **No NaN/Infinity handling**: `add()` throws on NaN/Infinity inputs rather than handling them gracefully. Non-finite values must be filtered before insertion.
-
 7. **No serialization API**: There is no built-in `toJSON()`/`fromJSON()`. To serialize, iterate centroids via `ascending()` and reconstruct with `append()`. Note that quantile markers are lost on round-trip reconstruction.
-
-8. **`mergeFrom(self)` is unsupported**: Self-merge causes iterator invalidation during mutation. To duplicate data, collect centroids from `ascending()` into an array first, then `append()` them.
+8. `**mergeFrom(self)` is unsupported**: Self-merge causes iterator invalidation during mutation. To duplicate data, collect centroids from `ascending()` into an array first, then `append()` them.
 
 #### Potential Enhancements
 
 1. **K-means integration**: Automatically detect and maintain cluster centers based on peak detection.
-
 2. **Allan variance**: For time-series data, AVAR could provide better stability and noise characterization.
-
 3. **Adaptive maxCentroids**: Automatically adjust based on `tightnessJ` to maintain quality targets.
-
 4. **Formal error bounds**: Develop theoretical bounds on quantile approximation error as a function of `maxCentroids` and curvature.
-
 5. **Non-parametric interpolation**: Alternative to normal distribution assumption, perhaps based on observed local shape.
-
 6. **Multi-dimensional extension**: Joint histograms or copula-based approaches for multivariate data.
-
 7. **Incremental computation**: Maintain running statistics (mean, std dev, skewness, kurtosis) incrementally.
 
 ## Contributing
@@ -573,15 +575,16 @@ Contributions to the Digitree Sparstogram library are welcome! Here's how you ca
 - **Pull Requests:** For direct contributions, please make your changes in a separate fork and submit a pull request with a clear list of what you've done.
 
 ### TODO:
-* kMeans computation - maybe even an option to maintain?  (See https://github.com/Digithought/Histogram for a C# implementation)
-* Allan Variance option - for sequence sensitive applications, AVAR will give superior results.
-* Maybe enable normal distribution based offset estimation?  ...Still trying to decide if this is useful.
+
+- kMeans computation - maybe even an option to maintain?  (See [https://github.com/Digithought/Histogram](https://github.com/Digithought/Histogram) for a C# implementation)
+- Allan Variance option - for sequence sensitive applications, AVAR will give superior results.
+- Maybe enable normal distribution based offset estimation?  ...Still trying to decide if this is useful.
 
 ### Environment
 
-* If using VSCode use the editorconfig plugin to honor the conventions in `.editorconfig`
-* Build: `yarn build` or `npm run build`
-* Test: `yarn test` or `npm test`
+- If using VSCode use the editorconfig plugin to honor the conventions in `.editorconfig`
+- Build: `yarn build` or `npm run build`
+- Test: `yarn test` or `npm test`
 
 ## License
 

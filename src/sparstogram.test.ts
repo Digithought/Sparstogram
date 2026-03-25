@@ -625,6 +625,14 @@ describe('Sparstogram Iterators', () => {
 			expect(values).to.deep.equal([20, 25]);
 		});
 
+		it('should start at quantile 0 (falsy-zero edge case)', () => {
+			sparstogram = new Sparstogram(10);
+			[10, 20, 5, 15, 25].forEach(value => sparstogram.add(value));
+			const values = Array.from(sparstogram.ascending({ quantile: 0 })).map(c => c.value);
+			expect(values[0]).to.equal(5); // quantile 0 → first centroid
+			expect(values).to.have.lengthOf(5);
+		});
+
 		it('should handle empty histograms', () => {
 			sparstogram = new Sparstogram(10, undefined); // Reset to an empty histogram
 			const values = Array.from(sparstogram.ascending()).map(c => c.value);
