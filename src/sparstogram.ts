@@ -326,9 +326,8 @@ export class Sparstogram {
 	 * @returns Iterator for the computed Peak entries in the histogram
 	 */
 	*peaks(smoothing: number = 3): IterableIterator<Peak> {
-		let left = new Array<Centroid>();	// TODO: replace these with ring buffers
-		let right = new Array<Centroid>();
-		const result: Peak[] = [];
+		const left = new Array<Centroid>();	// TODO: replace these with ring buffers
+		const right = new Array<Centroid>();
 		let peak: Peak | undefined;
 		let trend = 1;
 		for (let path of this._centroids.ascending(this._centroids.first())) {
@@ -414,7 +413,7 @@ export class Sparstogram {
 		const l = lpath.on ? this._centroids.at(lpath)! : undefined;
 		const r = rpath.on ? this._centroids.at(rpath)! : undefined;
 		const curv = this.localCurvature(l, a, b, r);
-		return base / (1e-9 + curv);
+		return base / (SCORE_EPSILON + curv);
 	}
 
 	private updateNextScore(path: Path<number, CentroidEntry>, newCentroid: Centroid): number {
@@ -428,11 +427,11 @@ export class Sparstogram {
 		const l = lpath.on ? this._centroids.at(lpath)! : undefined;
 		const r = rpath.on ? this._centroids.at(rpath)! : undefined;
 		const curv = this.localCurvature(l, a, b, r);
-		return base / (1e-9 + curv);
+		return base / (SCORE_EPSILON + curv);
 	}
 
 	private localCurvature(l: Centroid | undefined, a: Centroid, b: Centroid, r: Centroid | undefined): number {
-		const dens = (u: Centroid, v: Centroid) => (u.count + v.count) / (Math.abs(v.value - u.value) + 1e-12);
+		const dens = (u: Centroid, v: Centroid) => (u.count + v.count) / (Math.abs(v.value - u.value) + DENSITY_EPSILON);
 		const left = l ? Math.abs(dens(l, a) - dens(a, b)) : dens(a, b);
 		const right = r ? Math.abs(dens(a, b) - dens(b, r)) : dens(a, b);
 		return 0.5 * (left + right);
@@ -692,8 +691,11 @@ function combinedVariance(a: Centroid, b: Centroid): number {
 	return totalDF > 0 ? (ssA + ssB + ssBetween) / totalDF : 0;
 }
 
+// ---- Constants ----------------------------------------------------------------
+const SCORE_EPSILON = 1e-9;
+const DENSITY_EPSILON = 1e-12;
+
 // ---- Helpers for local metrics ------------------------------------------------
-function min2(a: number, b: number) { return a < b ? a : b; }
 
 /** Computes the edge contribution to the tightness metric for a pair of centroids.
  * Returns min(u.count, v.count) * |v.value - u.value|
@@ -702,11 +704,8 @@ function min2(a: number, b: number) { return a < b ? a : b; }
  * @returns Edge contribution value
  */
 export function edgeContribution(u: Centroid, v: Centroid): number {
-	return min2(u.count, v.count) * Math.abs(v.value - u.value);
+	return Math.min(u.count, v.count) * Math.abs(v.value - u.value);
 }
-
-// Bind the class method to this helper to avoid code drift.
-(Sparstogram.prototype as any).edgeContribution = edgeContribution;
 /** Calculates the Cumulative Distribution Function (CDF) for a normal distribution */
 function normalCDF(x: number, mean: number, variance: number): number {
 	const standardDeviation = Math.sqrt(variance);
@@ -732,80 +731,6 @@ function erf(x: number): number {
 
 	return sign * y;
 }
-
-// /** Approximation of the CDF using Beasley-Springer-Moro algorithm - credit ChatGPT */
-// function inverseNormalCDF(p: number): number {
-// 	const a1 = -3.969683028665376e+01;
-// 	const a2 = 2.209460984245205e+02;
-// 	const a3 = -2.759285104469687e+02;
-// 	const a4 = 1.383577518672690e+02;
-// 	const a5 = -3.066479806614716e+01;
-// 	const a6 = 2.506628277459239e+00;
-
-// 	const b1 = -5.447609879822406e+01;
-// 	const b2 = 1.615858368580409e+02;
-// 	const b3 = -1.556989798598866e+02;
-// 	const b4 = 6.680131188771972e+01;
-// 	const b5 = -1.328068155288572e+01;
-
-// 	const c1 = -7.784894002430293e-03;
-// 	const c2 = -3.223964580411365e-01;
-// 	const c3 = -2.400758277161838e+00;
-// 	const c4 = -2.549732539343734e+00;
-// 	const c5 = 4.374664141464968e+00;
-// 	const c6 = 2.938163982698783e+00;
-
-// 	const d1 = 7.784695709041462e-03;
-// 	const d2 = 3.224671290700398e-01;
-// 	const d3 = 2.445134137142996e+00;
-// 	const d4 = 3.754408661907416e+00;
-
-// 	// Define lower and upper fraction boundaries for rational approximations
-// 	const pLow = 0.02425;
-// 	const pHigh = 1 - pLow;
-
-// 	// Rational approximation for lower region
-// 	if (0 < p && p < pLow) {
-// 		const q = Math.sqrt(-2 * Math.log(p));
-// 		return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-// 			((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
-// 	}
-
-// 	// Rational approximation for central region
-// 	if (pLow <= p && p <= pHigh) {
-// 		const q = p - 0.5;
-// 		const r = q * q;
-// 		return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q /
-// 			(((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1);
-// 	}
-
-// 	// Rational approximation for upper region
-// 	if (pHigh < p && p < 1) {
-// 		const q = Math.sqrt(-2 * Math.log(1 - p));
-// 		return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-// 			((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
-// 	}
-
-// 	// If p is not in (0,1), return NaN as error state
-// 	return NaN;
-// }
-
-// Non-linear interpolation of the value from the offset within the centroid - DISABLED... is it worth it?
-// function inferValueFromOffset(offset: number, centroid: Centroid): number {
-// 	if (centroid.variance === 0) {
-// 			return centroid.value;
-// 	} else {
-// 			const standardDeviation = Math.sqrt(centroid.variance);
-
-// 			// Normalize and scale the offset to fall within the range of the distribution.
-// 			// This maps the offset to a percentile from 0 to 1, adjusting for distribution edges.
-// 			const percentile = (offset / (centroid.count - 1)) * 0.6826894921370859 + 0.15865525393145707;	// 1 sigma
-// 			// const percentile = (offset / (centroid.count - 1)) * 0.9544997361036416 + 0.022750131948179195;	// 2 sigma
-// 			// const percentile = (offset / (centroid.count - 1)) * 0.9973002039367398 + 0.0013498980316300933;	// 3 sigma
-
-// 			return centroid.value + standardDeviation * inverseNormalCDF(percentile);
-// 	}
-// }
 
 // Linear interpolation of the value over 1-sigma standard deviation breadth
 function inferValueFromOffset(offset: number, centroid: Centroid): number {
