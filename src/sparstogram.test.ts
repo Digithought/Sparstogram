@@ -973,6 +973,30 @@ describe('Edge Cases & Robustness', () => {
 			s.append({ value: 5, variance: 0, count: 1 });
 			expect(s.count).to.equal(1);
 		});
+
+		it('append() with NaN value throws', () => {
+			const s = new Sparstogram(10);
+			s.add(1);
+			expect(() => s.append({ value: NaN, variance: 0, count: 1 })).to.throw('Centroid value must be a finite number');
+			expect(s.count).to.equal(1);
+			expect(s.centroidCount).to.equal(1);
+		});
+
+		it('append() with Infinity value throws', () => {
+			const s = new Sparstogram(10);
+			s.add(1);
+			expect(() => s.append({ value: Infinity, variance: 0, count: 1 })).to.throw('Centroid value must be a finite number');
+			expect(s.count).to.equal(1);
+			expect(s.centroidCount).to.equal(1);
+		});
+
+		it('append() with -Infinity value throws', () => {
+			const s = new Sparstogram(10);
+			s.add(1);
+			expect(() => s.append({ value: -Infinity, variance: 0, count: 1 })).to.throw('Centroid value must be a finite number');
+			expect(s.count).to.equal(1);
+			expect(s.centroidCount).to.equal(1);
+		});
 	});
 
 	describe('numerical stability — variance=0 interpolation paths', () => {
