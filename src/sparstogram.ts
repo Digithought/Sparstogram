@@ -542,89 +542,99 @@ export class Sparstogram {
 
 	/** Compresses the two buckets with the smallest *score* into one bucket */
 	private compressOneBucket(): number {
-		const minLossPath = this._losses.first();
-		const minLossEntry = this._losses.at(minLossPath)!;
-		const minPath = this._centroids.find(minLossEntry.value);
-		if (!minPath.on) {
-			// Selected loss refers to a centroid that no longer exists. Drop and retry.
-			this._losses.deleteAt(minLossPath);
-			const nextLoss = this._losses.first();
-			if (!nextLoss.on) {
-				throw new Error("No compressible centroid pair available – loss index corrupt");
-			}
-			return this.compressOneBucket();
-		}
-		const minEntry = this._centroids.at(minPath)!;
-		const priorPath = this._centroids.prior(minPath);	// This should be there because the first entry should have infinite loss and never be selected
-		if (!priorPath.on) {
-			// Stale loss entry that points at the first centroid (no prior). Drop and retry.
-			this._losses.deleteAt(minLossPath);
-			const nextLoss = this._losses.first();
-			if (!nextLoss.on) {
-				throw new Error("No compressible centroid pair available – loss index corrupt");
-			}
-			return this.compressOneBucket();
-		}
-		const priorEntry = this._centroids.at(priorPath)!;
-		if (!priorEntry) {
-			// Defensive: if prior entry vanished due to concurrent manipulation, remove loss entry and retry.
-			this._losses.deleteAt(minLossPath);
-			const nextLoss = this._losses.first();
-			if (!nextLoss.on) {
-				throw new Error("No compressible centroid pair available – loss index corrupt");
-			}
-			return this.compressOneBucket();
-		}
-		const priorPriorPath = this._centroids.prior(priorPath);
-		const priorPriorEntry = priorPriorPath.on ? this._centroids.at(priorPriorPath)! : undefined;
-		const nextPath = this._centroids.next(minPath);
-		const nextEntry = nextPath.on ? this._centroids.at(nextPath)! : undefined;
+		const maxStaleRetries = 1000;
 
-		// Micro‑recentering: place merged centroid at the weighted median of the pair
-		const newCount = priorEntry.count + minEntry.count;
-		const newVariance = combinedVariance(priorEntry, minEntry);
-		const xWeightedMedian = (priorEntry.count >= minEntry.count) ? priorEntry.value : minEntry.value;
-		const newCentroid = { value: xWeightedMedian, count: newCount, variance: newVariance };
-		const newEntry = { ...newCentroid, loss: Infinity }; // placeholder; real score set after insert
+		for (let attempt = 0; ; attempt++) {
+			if (attempt >= maxStaleRetries) {
+				throw new Error(`compressOneBucket: exceeded ${maxStaleRetries} stale-entry retries – loss index corrupt`);
+			}
 
-		// Update markers
-		if (this._markers) {
-			for (let i = 0; i < this._markers.length; ++i) {
-				const marker = this._markers[i];
-				if (marker && marker.centroid) {
-					if (marker.centroid.value === priorEntry.value) {
-						marker.centroid = newEntry;
-					} else if (marker.centroid.value === minEntry.value) {
-						marker.offset += priorEntry.count;
-						marker.centroid = newEntry;
+			const minLossPath = this._losses.first();
+			const minLossEntry = this._losses.at(minLossPath)!;
+			const minPath = this._centroids.find(minLossEntry.value);
+			if (!minPath.on) {
+				// Selected loss refers to a centroid that no longer exists. Drop and retry.
+				this._losses.deleteAt(minLossPath);
+				const nextLoss = this._losses.first();
+				if (!nextLoss.on) {
+					throw new Error("No compressible centroid pair available – loss index corrupt");
+				}
+				continue;
+			}
+			const minEntry = this._centroids.at(minPath)!;
+			const priorPath = this._centroids.prior(minPath);	// This should be there because the first entry should have infinite loss and never be selected
+			if (!priorPath.on) {
+				// Stale loss entry that points at the first centroid (no prior). Drop and retry.
+				this._losses.deleteAt(minLossPath);
+				const nextLoss = this._losses.first();
+				if (!nextLoss.on) {
+					throw new Error("No compressible centroid pair available – loss index corrupt");
+				}
+				continue;
+			}
+			const priorEntry = this._centroids.at(priorPath)!;
+			if (!priorEntry) {
+				// Defensive: if prior entry vanished due to concurrent manipulation, remove loss entry and retry.
+				this._losses.deleteAt(minLossPath);
+				const nextLoss = this._losses.first();
+				if (!nextLoss.on) {
+					throw new Error("No compressible centroid pair available – loss index corrupt");
+				}
+				continue;
+			}
+
+			// Found a valid pair — proceed with merge
+			const priorPriorPath = this._centroids.prior(priorPath);
+			const priorPriorEntry = priorPriorPath.on ? this._centroids.at(priorPriorPath)! : undefined;
+			const nextPath = this._centroids.next(minPath);
+			const nextEntry = nextPath.on ? this._centroids.at(nextPath)! : undefined;
+
+			// Micro‑recentering: place merged centroid at the weighted median of the pair
+			const newCount = priorEntry.count + minEntry.count;
+			const newVariance = combinedVariance(priorEntry, minEntry);
+			const xWeightedMedian = (priorEntry.count >= minEntry.count) ? priorEntry.value : minEntry.value;
+			const newCentroid = { value: xWeightedMedian, count: newCount, variance: newVariance };
+			const newEntry = { ...newCentroid, loss: Infinity }; // placeholder; real score set after insert
+
+			// Update markers
+			if (this._markers) {
+				for (let i = 0; i < this._markers.length; ++i) {
+					const marker = this._markers[i];
+					if (marker && marker.centroid) {
+						if (marker.centroid.value === priorEntry.value) {
+							marker.centroid = newEntry;
+						} else if (marker.centroid.value === minEntry.value) {
+							marker.offset += priorEntry.count;
+							marker.centroid = newEntry;
+						}
 					}
 				}
 			}
+
+			// Remove the old buckets and insert the merged one
+			// Update tightness J locally for edges affected: (priorPrior,prior), (prior,min), (min,next)
+			if (priorPriorEntry) this._tightnessJ -= this.edgeContribution(priorPriorEntry, priorEntry);
+			this._tightnessJ -= this.edgeContribution(priorEntry, minEntry);
+			if (nextEntry) this._tightnessJ -= this.edgeContribution(minEntry, nextEntry);
+
+			this._centroids.deleteAt(priorPath);
+			this._centroids.deleteAt(this._centroids.find(minEntry.value)!);
+			const newPath = this._centroids.insert(newEntry);
+			const newScore = this.getPriorScore(newPath, newCentroid);
+			this._centroids.updateAt(newPath, { ...newEntry, loss: newScore });
+			this._losses.deleteAt(minLossPath);
+			this._losses.deleteAt(this._losses.find(priorEntry)!);
+			this._losses.insert({ loss: newScore, value: newEntry.value });
+			this.updateNext(newPath, newCentroid);
+
+			// Add new edge contributions
+			if (priorPriorEntry) this._tightnessJ += this.edgeContribution(priorPriorEntry, newCentroid);
+			if (nextEntry) this._tightnessJ += this.edgeContribution(newCentroid, nextEntry);
+
+			this._centroidCount--; // Reflect the merge in the bucket count
+
+			return this.computeLoss(priorEntry, minEntry); // base loss for API compatibility
 		}
-
-		// Remove the old buckets and insert the merged one
-		// Update tightness J locally for edges affected: (priorPrior,prior), (prior,min), (min,next)
-		if (priorPriorEntry) this._tightnessJ -= this.edgeContribution(priorPriorEntry, priorEntry);
-		this._tightnessJ -= this.edgeContribution(priorEntry, minEntry);
-		if (nextEntry) this._tightnessJ -= this.edgeContribution(minEntry, nextEntry);
-
-		this._centroids.deleteAt(priorPath);
-		this._centroids.deleteAt(this._centroids.find(minEntry.value)!);
-		const newPath = this._centroids.insert(newEntry);
-		const newScore = this.getPriorScore(newPath, newCentroid);
-		this._centroids.updateAt(newPath, { ...newEntry, loss: newScore });
-		this._losses.deleteAt(minLossPath);
-		this._losses.deleteAt(this._losses.find(priorEntry)!);
-		this._losses.insert({ loss: newScore, value: newEntry.value });
-		this.updateNext(newPath, newCentroid);
-
-		// Add new edge contributions
-		if (priorPriorEntry) this._tightnessJ += this.edgeContribution(priorPriorEntry, newCentroid);
-		if (nextEntry) this._tightnessJ += this.edgeContribution(newCentroid, nextEntry);
-
-		this._centroidCount--; // Reflect the merge in the bucket count
-
-		return this.computeLoss(priorEntry, minEntry); // base loss for API compatibility
 	}
 
 	private criteriaToPath(criteria?: Criteria): Path<number, CentroidEntry> | undefined {

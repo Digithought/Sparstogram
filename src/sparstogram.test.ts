@@ -1635,6 +1635,20 @@ describe('Performance & Scalability', () => {
 			expect(s.centroidCount).to.equal(3);
 			expect(s.count).to.equal(5000);
 		});
+
+		it('merge 5000-centroid histogram into maxCentroids=5 without stack overflow', function () {
+			this.timeout(10000);
+			const source = new Sparstogram(5000);
+			for (let i = 0; i < 5000; i++) source.add(i);
+			expect(source.centroidCount).to.equal(5000);
+
+			const target = new Sparstogram(5);
+			target.add(2500); // seed with one value
+			target.mergeFrom(source);
+			assertConsistent(target, 'after merging 5000-centroid source');
+			expect(target.centroidCount).to.equal(5);
+			expect(target.count).to.equal(5001);
+		});
 	});
 
 	describe('edgeContribution — exported function correctness', () => {
