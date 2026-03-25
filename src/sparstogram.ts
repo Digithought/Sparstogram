@@ -365,6 +365,7 @@ export class Sparstogram {
 
 	/** Returns an iterator for the centroids in the histogram in ascending order
 	 * @param criteria If specified, the iterator will start at the centroid at the given marker index or value; otherwise it will start at the first centroid
+	 * @remarks Mutating the histogram during iteration (via {@link add}, {@link append}, {@link mergeFrom}, or the {@link maxCentroids} setter) invalidates the iterator and may produce incorrect results or errors.
 	 */
 	*ascending(criteria?: Criteria): IterableIterator<Centroid> {
 		const startPath = this.criteriaToPath(criteria) ?? this._centroids.first();
@@ -375,6 +376,7 @@ export class Sparstogram {
 
 	/** Returns an iterator for the centroids in the histogram in descending order
 	 * @param criteria If specified, the iterator will start at the centroid at the given marker index or value; otherwise it will start at the last centroid
+	 * @remarks Mutating the histogram during iteration (via {@link add}, {@link append}, {@link mergeFrom}, or the {@link maxCentroids} setter) invalidates the iterator and may produce incorrect results or errors.
 	 */
 	*descending(criteria?: Criteria): IterableIterator<Centroid> {
 		const startPath = this.criteriaToPath(criteria) ?? this._centroids.last();

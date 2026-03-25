@@ -530,6 +530,8 @@ function getHourlyAggregate(hour: number) {
 
 4. **Single dimension**: Currently handles univariate data only (though could be extended to multiple independent histograms).
 
+5. **Iterator invalidation**: The `ascending()` and `descending()` generators yield lazily from internal B+Tree paths. Mutating the histogram during iteration (via `add()`, `append()`, `mergeFrom()`, or the `maxCentroids` setter) invalidates the iterator and may produce incorrect results or errors.
+
 #### Potential Enhancements
 
 1. **K-means integration**: Automatically detect and maintain cluster centers based on peak detection.
