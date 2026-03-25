@@ -54,6 +54,44 @@ export interface Criteria {
 	quantile?: Quantile;
 }
 
+/** Fixed-capacity ring buffer with O(1) push, shift, and indexed access. */
+class RingBuffer<T> {
+	private _buffer: T[];
+	private _head = 0;
+	private _count = 0;
+
+	constructor(private _capacity: number) {
+		this._buffer = new Array<T>(_capacity);
+	}
+
+	get length(): number { return this._count; }
+
+	push(item: T): void {
+		this._buffer[(this._head + this._count) % this._capacity] = item;
+		this._count++;
+	}
+
+	shift(): T {
+		const item = this._buffer[this._head];
+		this._head = (this._head + 1) % this._capacity;
+		this._count--;
+		return item;
+	}
+
+	at(index: number): T {
+		if (index < 0) index += this._count;
+		return this._buffer[(this._head + index) % this._capacity];
+	}
+
+	reduce<U>(fn: (acc: U, item: T) => U, initial: U): U {
+		let acc = initial;
+		for (let i = 0; i < this._count; i++) {
+			acc = fn(acc, this._buffer[(this._head + i) % this._capacity]);
+		}
+		return acc;
+	}
+}
+
 /** A histogram that maintains a complete or sparse approximation of the data frequency.
  * The representation will be complete if the number of distinct values is less than or equal to the maxCentroids.
  * Otherwise, the values will be compressed to a smaller number of centroids in a way that minimizes the loss.
@@ -335,8 +373,9 @@ export class Sparstogram {
 	 * @returns Iterator for the computed Peak entries in the histogram
 	 */
 	*peaks(smoothing: number = 3): IterableIterator<Peak> {
-		const left = new Array<Centroid>();	// TODO: replace these with ring buffers
-		const right = new Array<Centroid>();
+		if (smoothing < 1) return;
+		const left = new RingBuffer<Centroid>(smoothing + 1);
+		const right = new RingBuffer<Centroid>(smoothing + 1);
 		let peak: Peak | undefined;
 		let trend = 1;
 		for (const path of this._centroids.ascending(this._centroids.first())) {

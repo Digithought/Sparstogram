@@ -1974,13 +1974,14 @@ describe('Remaining Error Paths', () => {
 	});
 
 	describe('peaks(0) and peaks(-1)', () => {
-		it('peaks(0) throws TypeError (documented bug: left.at(-1) is undefined when smoothing=0)', () => {
+		it('peaks(0) returns no peaks (smoothing < 1 is a no-op)', () => {
 			const s = new Sparstogram(10);
 			for (let i = 0; i < 5; i++) s.add(i);
-			expect(() => Array.from(s.peaks(0))).to.throw(TypeError);
+			const peaks = Array.from(s.peaks(0));
+			expect(peaks).to.have.lengthOf(0);
 		});
 
-		it('peaks(-1) returns no peaks (window condition never satisfied)', () => {
+		it('peaks(-1) returns no peaks (smoothing < 1 is a no-op)', () => {
 			const s = new Sparstogram(10);
 			for (let i = 0; i < 5; i++) s.add(i);
 			const peaks = Array.from(s.peaks(-1));
