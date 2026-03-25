@@ -112,6 +112,7 @@ export class Sparstogram {
 		return this._maxCentroids;
 	}
 
+	/** @throws {Error} If value is less than 1 */
 	set maxCentroids(value: number) {
 		if (value < 1) {
 			throw new Error("maxCentroids must be at least 1");
@@ -165,6 +166,9 @@ export class Sparstogram {
 	 * Adds all centroids before compressing to incur the least loss.
 	 * If you want to reduce memory usage, or monitor loss, use an iterator with sequential calls to this rather than this method.
 	 * @returns The maximal loss incurred by compression, if any
+	 * @throws {Error} If any centroid value is not finite (NaN or Infinity)
+	 * @throws {Error} If any centroid count is less than 1
+	 * @throws {Error} If any centroid variance is negative
 	 */
 	append(...centroids: Centroid[]) {
 		for (const centroid of centroids) {
@@ -244,6 +248,8 @@ export class Sparstogram {
 	/** Returns the centroid at a given rank in the histogram (count / 2 = median)
 	 * @param rank The rank (accumulated count from start if positive, end if negative) to find the value for
 	 * @returns The Quantile information at the given rank in the histogram - always returns a positive rank
+	 * @throws {Error} If rank is zero
+	 * @throws {Error} If rank is out of range (exceeds total count)
 	 */
 	valueAt(rank: number): Quantile {
 		if (rank === 0) {
@@ -307,6 +313,7 @@ export class Sparstogram {
 	/** Returns the quantile marker at a given index, as given by markers at construction (0 = median, 1 = lower quartile, 2 = upper quartile, etc.)
 	 * @param index The index of the marker to find the value for
 	 * @returns The Quartile information at the given marker in the histogram
+	 * @throws {Error} If the index does not correspond to a marker given to the constructor
 	 */
 	markerAt(index: number): Quantile {
 		if (this._markers) {

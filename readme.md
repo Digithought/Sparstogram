@@ -8,7 +8,7 @@ This Typescript library provides a sophisticated data structure for efficiently 
 
 Sparstogram is a histogram that maintains a complete or sparse approximation of the data frequency.  The representation will be complete if the number of distinct values is less than or equal to the `maxCentroids`.  Otherwise, the values will be compressed to a smaller number of centroids in a way that intelligently minimizes loss while preserving distribution features like peaks and tails.  The histogram can also maintain a set of quantiles, which are maintained with each new value (e.g. median can be efficiently maintained).  The structure is adaptive in range and resolution, and can be used for streaming or large data digests.
 
-![Histogram vs Sparstogram](doc/complex-diagram.jpg)
+![Histogram vs Sparstogram](doc/figures/complex-diagram.jpg)
 
 The implementation uses B+Trees to efficiently maintain the centroids and their priority scores, which is a self-balancing structure that scales efficiently.  As the number of unique data values grows beyond the configured `maxCentroids`, the loss returned from the `add` method will begin to be non-zero and represents how well the data compresses.  If and when this loss grows over some threshold, the user can choose to increase the `maxCentroids` value to maintain higher accuracy.  On the other hand, `maxCentroids` can be dynamically shrunk to reduce memory, at the expense of more approximation.
 
@@ -192,6 +192,10 @@ Or, if you prefer using `pnpm`:
 ```bash
 pnpm add sparstogram
 ```
+
+> **Note:** Sparstogram is an ESM-only package (`"type": "module"` in package.json). CommonJS consumers must use dynamic import: `const { Sparstogram } = await import('sparstogram');`
+
+Requires Node.js 16.11 or later (ES2022).
 
 ## Usage
 
@@ -490,6 +494,12 @@ For large-scale systems, use tree-based aggregation:
 
 Each merge operation is efficient and the variance tracking ensures accuracy is maintained.
 
+#### Merge Caveats
+
+- **Quantile markers from source are ignored**: Only the target histogram's markers are updated during merge.
+- **`mergeFrom(self)` is not supported**: Self-merge causes iterator invalidation during mutation. Collect centroids into an array via `ascending()` and use `append()` instead.
+- **Merge is not commutative**: Weighted-median recentering means `a.mergeFrom(b)` may produce slightly different results than `b.mergeFrom(a)`.
+
 #### Time-Window Aggregation
 
 For streaming systems with time windows:
@@ -531,6 +541,12 @@ function getHourlyAggregate(hour: number) {
 4. **Single dimension**: Currently handles univariate data only (though could be extended to multiple independent histograms).
 
 5. **Iterator invalidation**: The `ascending()` and `descending()` generators yield lazily from internal B+Tree paths. Mutating the histogram during iteration (via `add()`, `append()`, `mergeFrom()`, or the `maxCentroids` setter) invalidates the iterator and may produce incorrect results or errors.
+
+6. **No NaN/Infinity handling**: `add()` throws on NaN/Infinity inputs rather than handling them gracefully. Non-finite values must be filtered before insertion.
+
+7. **No serialization API**: There is no built-in `toJSON()`/`fromJSON()`. To serialize, iterate centroids via `ascending()` and reconstruct with `append()`. Note that quantile markers are lost on round-trip reconstruction.
+
+8. **`mergeFrom(self)` is unsupported**: Self-merge causes iterator invalidation during mutation. To duplicate data, collect centroids from `ascending()` into an array first, then `append()` them.
 
 #### Potential Enhancements
 
