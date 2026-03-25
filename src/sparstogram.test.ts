@@ -2091,3 +2091,200 @@ describe('Remaining Error Paths', () => {
 		});
 	});
 });
+
+// === Phase 1: Property-Based Invariants ======================================
+
+describe('Property-Based Invariants', () => {
+
+	describe('rank roundtrip', () => {
+		it('uncompressed: rankAt(valueAt(r).value) === r for all valid ranks', () => {
+			const s = new Sparstogram(20);
+			for (let i = 1; i <= 10; i++) s.add(i);
+			// No compression: 10 values, maxCentroids=20
+			expect(s.centroidCount).to.equal(10);
+
+			for (let r = 1; r <= 10; r++) {
+				const q = s.valueAt(r);
+				const roundtrip = s.rankAt(q.value);
+				expect(roundtrip).to.equal(r,
+					`rank roundtrip failed for rank ${r}: valueAt(${r}).value=${q.value}, rankAt(${q.value})=${roundtrip}`);
+			}
+		});
+
+		it('compressed: rankAt(valueAt(r).value) ≈ r within tolerance', () => {
+			const s = new Sparstogram(5);
+			for (let i = 1; i <= 100; i++) s.add(i);
+			expect(s.centroidCount).to.equal(5);
+
+			const sampleRanks = [1, 25, 50, 75, 100];
+			const tolerance = 0.20 * 100; // 20% of count
+			for (const r of sampleRanks) {
+				const q = s.valueAt(r);
+				const roundtrip = s.rankAt(q.value);
+				expect(roundtrip).to.be.closeTo(r, tolerance,
+					`compressed rank roundtrip failed for rank ${r}: valueAt(${r}).value=${q.value}, rankAt=${roundtrip}`);
+			}
+		});
+	});
+
+	describe('rankAt monotonicity sweep', () => {
+		it('rankAt is monotonically non-decreasing for 50 evenly spaced probes', () => {
+			const s = new Sparstogram(5);
+			for (let i = 1; i <= 100; i++) s.add(i);
+
+			// Get range from centroids
+			const centroids = Array.from(s.ascending());
+			const minVal = centroids[0].value;
+			const maxVal = centroids[centroids.length - 1].value;
+
+			const numProbes = 50;
+			const step = (maxVal - minVal) / (numProbes - 1);
+			let prevRank = -Infinity;
+
+			for (let i = 0; i < numProbes; i++) {
+				const probe = minVal + i * step;
+				const rank = s.rankAt(probe);
+				expect(rank).to.be.at.least(prevRank,
+					`rankAt monotonicity violated: rankAt(${probe})=${rank} < prevRank=${prevRank}`);
+				prevRank = rank;
+			}
+		});
+	});
+
+	describe('mergeFrom commutativity', () => {
+		it('merge(A,B) and merge(B,A) produce same count and similar rankAt results', () => {
+			// Build A with 50 values [0..49], B with 50 values [25..74]
+			const maxC = 10;
+			const a1 = new Sparstogram(maxC);
+			const b1 = new Sparstogram(maxC);
+			for (let i = 0; i < 50; i++) a1.add(i);
+			for (let i = 25; i < 75; i++) b1.add(i);
+
+			// Clone by iterating ascending and appending
+			function clone(src: Sparstogram): Sparstogram {
+				const dst = new Sparstogram(maxC);
+				for (const c of src.ascending()) {
+					dst.append({ value: c.value, variance: c.variance, count: c.count });
+				}
+				return dst;
+			}
+
+			// merge(A, B)
+			const ab = clone(a1);
+			ab.mergeFrom(b1);
+
+			// merge(B, A)
+			const ba = clone(b1);
+			ba.mergeFrom(a1);
+
+			// Same total count
+			expect(ab.count).to.equal(ba.count);
+			expect(ab.count).to.equal(100);
+
+			// Both should respect maxCentroids
+			expect(ab.centroidCount).to.be.at.most(maxC);
+			expect(ba.centroidCount).to.be.at.most(maxC);
+
+			// rankAt for 10 probe values should agree within 10% of total count
+			const tolerance = 0.10 * 100;
+			const probes = [0, 10, 20, 30, 40, 50, 60, 70, 74, 80];
+			for (const probe of probes) {
+				const rAB = ab.rankAt(probe);
+				const rBA = ba.rankAt(probe);
+				expect(rAB).to.be.closeTo(rBA, tolerance,
+					`merge commutativity: rankAt(${probe}) differs: AB=${rAB}, BA=${rBA}`);
+			}
+		});
+	});
+
+	describe('tightnessJ monotonicity under compression', () => {
+		it('tightnessJ generally increases as maxCentroids is reduced', () => {
+			// NOTE: exact step-by-step monotonicity is not guaranteed with the
+			// current curvature-aware score formula (see ticket dependency:
+			// 5-inverted-curvature-score-formula). This test verifies the overall
+			// trend and that the metric stays finite/non-negative throughout.
+			const s = new Sparstogram(20);
+			for (let i = 0; i < 20; i++) s.add(i);
+			expect(s.centroidCount).to.equal(20);
+
+			const initialJ = s.tightnessJ;
+
+			// Record tightnessJ at each step
+			const steps: { maxC: number; j: number }[] = [{ maxC: 20, j: initialJ }];
+			for (let maxC = 15; maxC >= 2; maxC--) {
+				s.maxCentroids = maxC;
+				const currentJ = s.tightnessJ;
+				expect(Number.isFinite(currentJ)).to.be.true;
+				expect(currentJ).to.be.at.least(0);
+				steps.push({ maxC, j: currentJ });
+			}
+
+			// Overall trend: tightnessJ at maxC=2 should be >= at maxC=20
+			const finalJ = steps[steps.length - 1].j;
+			expect(finalJ).to.be.at.least(initialJ,
+				`tightnessJ should increase overall: initial=${initialJ}, final=${finalJ}`);
+		});
+	});
+});
+
+// === Phase 2: Stress & Scale Testing =========================================
+
+describe('Stress & Scale Testing', () => {
+
+	describe('100K stress test (maxCentroids=50)', () => {
+		it('handles 100K uniform values correctly', function () {
+			this.timeout(5000);
+			const s = new Sparstogram(50);
+			for (let i = 0; i < 100000; i++) s.add(i);
+
+			expect(s.count).to.equal(100000);
+			expect(s.centroidCount).to.be.at.most(50);
+
+			// All query methods return finite results
+			expect(Number.isFinite(s.rankAt(50000))).to.be.true;
+			const vat = s.valueAt(50000);
+			expect(Number.isFinite(vat.value)).to.be.true;
+			expect(Number.isFinite(s.countAt(50000))).to.be.true;
+			const qat = s.quantileAt(0.5);
+			expect(Number.isFinite(qat.value)).to.be.true;
+		});
+	});
+
+	describe('100K stress test (maxCentroids=5)', () => {
+		it('handles 100K uniform values with heavy compression', function () {
+			this.timeout(5000);
+			const s = new Sparstogram(5);
+			for (let i = 0; i < 100000; i++) s.add(i);
+
+			expect(s.count).to.equal(100000);
+			expect(s.centroidCount).to.be.at.most(5);
+
+			// All query methods return finite results
+			expect(Number.isFinite(s.rankAt(50000))).to.be.true;
+			const vat = s.valueAt(50000);
+			expect(Number.isFinite(vat.value)).to.be.true;
+			expect(Number.isFinite(s.countAt(50000))).to.be.true;
+			const qat = s.quantileAt(0.5);
+			expect(Number.isFinite(qat.value)).to.be.true;
+		});
+	});
+
+	describe('memory proportionality', () => {
+		it('centroidCount === maxCentroids after 100K additions and exactly that many centroids via iterator', function () {
+			this.timeout(5000);
+			const s = new Sparstogram(50);
+			for (let i = 0; i < 100000; i++) s.add(i);
+
+			expect(s.centroidCount).to.equal(50);
+
+			// Verify by iterating ascending: exactly 50 centroids
+			const centroids = Array.from(s.ascending());
+			expect(centroids).to.have.lengthOf(50);
+
+			// Verify total count from centroids
+			let totalCount = 0;
+			for (const c of centroids) totalCount += c.count;
+			expect(totalCount).to.equal(100000);
+		});
+	});
+});
