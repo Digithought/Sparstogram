@@ -278,7 +278,7 @@ describe('atMarker method', () => {
 		expect(upperQuartile?.rank).to.equal(75);
 	});
 
-	it('should return correct quantile for a compressed histogram', () => {
+	it('should return correct quantile for a compressed histogram', () => { // regression: v0.9.5 (marker offset fix)
 		const markers = [0.25, 0.5, 0.75]; // Lower quartile, median, upper quartile
 		const sparstogram = new Sparstogram(10, markers);
 		sparstogram.add(50);
@@ -1154,7 +1154,7 @@ describe('Edge Cases & Robustness', () => {
 
 describe('Algorithm Correctness — Curvature-Aware Compression', () => {
 
-	describe('combinedVariance correctness', () => {
+	describe('combinedVariance correctness', () => { // regression: v0.9.5 (combinedVariance fix)
 		it('two single-point centroids at same value yields variance=0', () => {
 			const s = new Sparstogram(1);
 			s.add(5);
@@ -1770,6 +1770,324 @@ describe('Performance & Scalability', () => {
 			// This indirectly validates the min2 helper at line 674
 			const result = edgeContribution({ value: 0, variance: 0, count: 100 }, { value: 1, variance: 0, count: 1 });
 			expect(result).to.equal(1); // min(100,1) * |1-0| = 1
+		});
+	});
+});
+
+// === Phase 3: Distribution Diversity =========================================
+
+describe('Distribution Diversity', () => {
+	// Seeded LCG PRNG: x = (a * x + c) % m, a=1664525, c=1013904223, m=2^32
+	function lcg(seed: number) {
+		let state = seed >>> 0;
+		return () => {
+			state = (1664525 * state + 1013904223) >>> 0;
+			return state / 0x100000000;
+		};
+	}
+
+	describe('Normal/Gaussian distribution', () => {
+		it('median centroid is near the mean and rankAt(mean) ≈ count/2', () => {
+			const s = new Sparstogram(50);
+			const rand = lcg(42);
+			const mean = 100;
+			const stddev = 15;
+			const N = 1000;
+
+			// Box-Muller transform with seeded PRNG
+			for (let i = 0; i < N; i += 2) {
+				const u1 = rand();
+				const u2 = rand();
+				const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+				const z1 = Math.sqrt(-2 * Math.log(u1)) * Math.sin(2 * Math.PI * u2);
+				s.add(mean + stddev * z0);
+				if (i + 1 < N) s.add(mean + stddev * z1);
+			}
+
+			// Median centroid should be near the mean
+			const median = s.quantileAt(0.5);
+			expect(median.centroid.value).to.be.closeTo(mean, stddev);
+
+			// rankAt(mean) should be approximately count/2
+			const rankAtMean = s.rankAt(mean);
+			expect(rankAtMean).to.be.closeTo(N / 2, N * 0.15);
+		});
+	});
+
+	describe('Exponential/skewed distribution', () => {
+		it('preserves mode region near 0 with more centroids than tail', () => {
+			const s = new Sparstogram(20);
+			const rand = lcg(123);
+			const N = 1000;
+			const scale = 10;
+
+			for (let i = 0; i < N; i++) {
+				const u = rand();
+				s.add(-Math.log(u) * scale);
+			}
+
+			// rankAt near 0 should grow faster than rankAt in the tail
+			const rankNear0 = s.rankAt(scale);
+			const rankInTail = s.rankAt(scale * 5) - s.rankAt(scale * 4);
+			expect(rankNear0).to.be.greaterThan(rankInTail);
+		});
+	});
+
+	describe('Reverse input order', () => {
+		it('N..1 produces correct count, respects maxCentroids, and rankAt is monotonic', () => {
+			const N = 200;
+			const s = new Sparstogram(20);
+			for (let i = N; i >= 1; i--) {
+				s.add(i);
+			}
+
+			expect(s.count).to.equal(N);
+			expect(s.centroidCount).to.be.at.most(20);
+
+			// rankAt monotonicity
+			let prevRank = 0;
+			for (let v = 0; v <= N + 1; v += 10) {
+				const rank = s.rankAt(v);
+				expect(rank).to.be.at.least(prevRank);
+				prevRank = rank;
+			}
+		});
+	});
+
+	describe('Random input order', () => {
+		it('shuffled 0..N-1 yields same count and similar ranks as sorted input', () => {
+			const N = 200;
+			const rand = lcg(999);
+
+			// Fisher-Yates shuffle with seeded PRNG
+			const arr = Array.from({ length: N }, (_, i) => i);
+			for (let i = N - 1; i > 0; i--) {
+				const j = Math.floor(rand() * (i + 1));
+				[arr[i], arr[j]] = [arr[j], arr[i]];
+			}
+
+			const shuffled = new Sparstogram(20);
+			for (const v of arr) shuffled.add(v);
+
+			const sorted = new Sparstogram(20);
+			for (let i = 0; i < N; i++) sorted.add(i);
+
+			expect(shuffled.count).to.equal(sorted.count);
+			expect(shuffled.centroidCount).to.equal(sorted.centroidCount);
+
+			// Ranks should be similar (within compression tolerance)
+			for (const probe of [10, 50, 100, 150, 190]) {
+				const rShuffled = shuffled.rankAt(probe);
+				const rSorted = sorted.rankAt(probe);
+				expect(rShuffled).to.be.closeTo(rSorted, N * 0.1);
+			}
+		});
+	});
+});
+
+// === Phase 4: Remaining Error Paths ==========================================
+
+describe('Remaining Error Paths', () => {
+
+	describe('markerAt() out-of-bounds', () => {
+		it('markerAt(markers.length) throws "Invalid marker"', () => {
+			const s = new Sparstogram(10, [0.5]);
+			s.add(10);
+			expect(() => s.markerAt(1)).to.throw('Invalid marker');
+		});
+
+		it('markerAt(-1) throws "Invalid marker"', () => {
+			const s = new Sparstogram(10, [0.5]);
+			s.add(10);
+			expect(() => s.markerAt(-1)).to.throw('Invalid marker');
+		});
+	});
+
+	describe('descending() invalid criteria', () => {
+		it('descending({}) throws "Either markerIndex, value, or quantile must be specified"', () => {
+			const s = new Sparstogram(10, [0.5]);
+			[10, 20, 30].forEach(v => s.add(v));
+			expect(() => Array.from(s.descending({}))).to.throw('Either markerIndex, value, or quantile must be specified');
+		});
+
+		it('descending({value: 1, markerIndex: 0}) throws "Only one of..."', () => {
+			const s = new Sparstogram(10, [0.5]);
+			[10, 20, 30].forEach(v => s.add(v));
+			expect(() => Array.from(s.descending({ value: 1, markerIndex: 0 }))).to.throw('Only one of');
+		});
+
+		it('descending({value: 1, quantile: q}) throws "Only one of..."', () => {
+			const s = new Sparstogram(10, [0.5]);
+			[10, 20, 30].forEach(v => s.add(v));
+			const q = s.valueAt(1);
+			expect(() => Array.from(s.descending({ value: 1, quantile: q }))).to.throw('Only one of');
+		});
+
+		it('descending({markerIndex: 0, quantile: q}) throws "Only one of..."', () => {
+			const s = new Sparstogram(10, [0.5]);
+			[10, 20, 30].forEach(v => s.add(v));
+			const q = s.valueAt(1);
+			expect(() => Array.from(s.descending({ markerIndex: 0, quantile: q }))).to.throw('Only one of');
+		});
+	});
+
+	describe('append() variadic', () => {
+		it('append(c1, c2, c3) adds all centroids in one call', () => {
+			const s = new Sparstogram(10);
+			const loss = s.append(
+				{ value: 10, variance: 0, count: 1 },
+				{ value: 20, variance: 0, count: 2 },
+				{ value: 30, variance: 0, count: 3 }
+			);
+			expect(loss).to.equal(0);
+			expect(s.count).to.equal(6);
+			expect(s.centroidCount).to.equal(3);
+			const values = Array.from(s.ascending()).map(c => c.value);
+			expect(values).to.deep.equal([10, 20, 30]);
+		});
+
+		it('variadic append with compression incurs loss', () => {
+			const s = new Sparstogram(2);
+			const loss = s.append(
+				{ value: 10, variance: 0, count: 1 },
+				{ value: 20, variance: 0, count: 1 },
+				{ value: 30, variance: 0, count: 1 }
+			);
+			expect(loss).to.be.greaterThan(0);
+			expect(s.centroidCount).to.be.at.most(2);
+			expect(s.count).to.equal(3);
+		});
+	});
+
+	describe('add(-0)', () => {
+		it('-0 coalesces with 0 (B+Tree comparator: (-0) - 0 === 0)', () => {
+			const s = new Sparstogram(10);
+			s.add(0);
+			s.add(-0);
+			expect(s.centroidCount).to.equal(1);
+			expect(s.count).to.equal(2);
+			const c = Array.from(s.ascending())[0];
+			// Value stays as +0 from first insert (combineSharedMean keeps centroidA.value)
+			expect(c.value).to.equal(0);
+			expect(Object.is(c.value, 0)).to.be.true;
+		});
+	});
+
+	describe('peaks(0) and peaks(-1)', () => {
+		it('peaks(0) throws TypeError (documented bug: left.at(-1) is undefined when smoothing=0)', () => {
+			const s = new Sparstogram(10);
+			for (let i = 0; i < 5; i++) s.add(i);
+			expect(() => Array.from(s.peaks(0))).to.throw(TypeError);
+		});
+
+		it('peaks(-1) returns no peaks (window condition never satisfied)', () => {
+			const s = new Sparstogram(10);
+			for (let i = 0; i < 5; i++) s.add(i);
+			const peaks = Array.from(s.peaks(-1));
+			expect(peaks).to.have.lengthOf(0);
+		});
+	});
+
+	describe('edgeContribution edge cases', () => {
+		it('zero count centroid returns 0', () => {
+			const result = edgeContribution(
+				{ value: 0, variance: 0, count: 0 },
+				{ value: 10, variance: 0, count: 5 }
+			);
+			expect(result).to.equal(0); // min(0, 5) * |10-0| = 0
+		});
+
+		it('negative values: returns count * distance', () => {
+			const result = edgeContribution(
+				{ value: -10, variance: 0, count: 3 },
+				{ value: 10, variance: 0, count: 5 }
+			);
+			expect(result).to.equal(3 * 20); // min(3, 5) * |10-(-10)| = 60
+		});
+	});
+
+	describe('maxCentroids=1 full API exercise', () => {
+		it('exercises all API methods on a single-centroid histogram', () => {
+			const s = new Sparstogram(1, [0.5]);
+			for (let i = 1; i <= 10; i++) s.add(i);
+
+			expect(s.count).to.equal(10);
+			expect(s.centroidCount).to.equal(1);
+
+			// rankAt
+			const rank = s.rankAt(5);
+			expect(rank).to.be.at.least(0);
+			expect(rank).to.be.at.most(10);
+
+			// valueAt
+			const val = s.valueAt(1);
+			expect(val.rank).to.equal(1);
+			expect(val.centroid.count).to.equal(10);
+
+			// countAt
+			const count = s.countAt(5);
+			expect(count).to.be.at.least(0);
+
+			// quantileAt
+			const q = s.quantileAt(0.5);
+			expect(q.rank).to.be.at.least(1);
+
+			// peaks — single centroid, no peaks possible
+			const peaks = Array.from(s.peaks());
+			expect(peaks).to.have.lengthOf(0);
+
+			// ascending / descending
+			const asc = Array.from(s.ascending());
+			expect(asc).to.have.lengthOf(1);
+			const desc = Array.from(s.descending());
+			expect(desc).to.have.lengthOf(1);
+
+			// markerAt
+			const marker = s.markerAt(0);
+			expect(marker.centroid.count).to.equal(10);
+		});
+	});
+
+	describe('maxCentroids=2 full API exercise', () => {
+		it('exercises all API methods on a two-centroid histogram', () => {
+			const s = new Sparstogram(2, [0.25, 0.75]);
+			for (let i = 1; i <= 20; i++) s.add(i);
+
+			expect(s.count).to.equal(20);
+			expect(s.centroidCount).to.be.at.most(2);
+
+			// rankAt
+			const rank = s.rankAt(10);
+			expect(rank).to.be.at.least(0);
+			expect(rank).to.be.at.most(20);
+
+			// valueAt
+			const val = s.valueAt(1);
+			expect(val.rank).to.equal(1);
+
+			// countAt
+			const count = s.countAt(10);
+			expect(count).to.be.at.least(0);
+
+			// quantileAt
+			const q = s.quantileAt(0.5);
+			expect(q.rank).to.be.at.least(1);
+
+			// peaks — 2 centroids, default smoothing=3, not enough
+			const peaks = Array.from(s.peaks());
+			expect(peaks).to.have.lengthOf(0);
+
+			// ascending / descending
+			const asc = Array.from(s.ascending());
+			expect(asc.length).to.be.at.most(2);
+			const desc = Array.from(s.descending());
+			expect(desc.length).to.be.at.most(2);
+
+			// markerAt
+			const m0 = s.markerAt(0);
+			expect(m0.rank).to.be.at.least(1);
+			const m1 = s.markerAt(1);
+			expect(m1.rank).to.be.at.least(1);
 		});
 	});
 });
