@@ -294,7 +294,7 @@ Scaling is sub-linear in maxCentroids — confirms O(log n) per add, with consta
 | 8.4 | `prepublishOnly` runs `doc` generation | done | `docs/` (TypeDoc HTML output) is correctly excluded from the published package. The `.npmignore` uses a deny-all (`*`) plus whitelist (`!dist/*`, `!LICENSE`, `!package.json`) strategy, so only whitelisted paths ship. `npm pack --dry-run` confirms: only `dist/*`, `LICENSE`, `README.md`, `package.json` are included. |
 | 8.5 | No CI/CD pipeline | **fix recommended** | No GitHub Actions or equivalent. Risk of publishing broken builds. Plan ticket created for CI setup. |
 | 8.6 | ES2022 target compatibility | **fix recommended** | `tsconfig.json` targets ES2022 which requires Node.js >= 16.11. Not documented in `package.json` `engines` field or README. Plan ticket created. |
-| 8.7 | `--loader=ts-node/esm` deprecation | **fix recommended** | `package.json:15` — test script uses `node --loader=ts-node/esm`. Node.js 20+ emits `ExperimentalWarning` and `DEP0180`. Node v24.2.0 (current) still works but the API is deprecated. Should migrate to `--import` flag or use `tsx`. Plan ticket created. |
+| 8.7 | `--loader=ts-node/esm` deprecation | done | Migrated to `--import tsx` with `tsx` as devDependency. `ts-node` removed. Test, bench, and VS Code debug configs all updated. No deprecation warnings. |
 | 8.8 | `.npmignore` completeness | done | Strategy is deny-all + whitelist: `*` then `!dist/*`, `!LICENSE`, `!package.json`. This is robust — everything not explicitly whitelisted is excluded. Verified via `npm pack --dry-run`: 9 files total (LICENSE, README.md, 6 dist files, package.json). `.vscode/`, `doc/`, `docs/`, `src/`, `tickets/`, `tess/`, `test/` all correctly excluded. |
 | 8.9 | `tsconfig.build.json` vs `tsconfig.json` | done | Build config extends base, narrows `include` to `["src"]`, and excludes `**/*.test.*` and `./test`. Base includes `["src", "test"]` for IDE support. Build correctly produces only library code. Declarations enabled in base (`"declaration": true`), inherited by build. No test `.d.ts` files in dist. Correct. |
 | 8.10 | LICENSE file | done | MIT license file exists at project root (9.2KB). Included in NPM package (verified via `npm pack --dry-run`). |
@@ -371,7 +371,7 @@ Scaling is sub-linear in maxCentroids — confirms O(log n) per add, with consta
 **Follow-up tickets:**
 - *Recommended:* Update `digitree` from 1.4.0 to 1.4.6 — bug fixes and improvements from same author
 - *Recommended:* Run `npm audit fix` to resolve dev dependency advisories (12 total, all in dev transitive deps)
-- *Low priority:* Consider `tsx` migration for test runner to replace deprecated `--loader` flag
+- ~~*Low priority:* Consider `tsx` migration for test runner to replace deprecated `--loader` flag~~ — done (migrated to `--import tsx`)
 - *Low priority:* Evaluate TypeScript 6.0, ESLint 10, Chai 6 major version upgrades
 
 ---
@@ -420,7 +420,7 @@ Scaling is sub-linear in maxCentroids — confirms O(log n) per add, with consta
 | **Low** | No test coverage for NaN, Infinity, stress scenarios | R5 | 5.1, 5.3 |
 | **Low** | 12 npm audit advisories in dev transitive deps (0 runtime) | R11 | 11.4 |
 | **Low** | `digitree` 1.4.0 installed, 1.4.6 available (semver-minor) | R11 | 11.2 |
-| **Low** | `ts-node --loader` deprecated in Node.js 22+ | R11 | 11.7 |
+| ~~**Low**~~ | ~~`ts-node --loader` deprecated in Node.js 22+~~ (done) | R11 | 11.7 |
 
 ---
 
