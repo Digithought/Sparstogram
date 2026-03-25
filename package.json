@@ -17,8 +17,10 @@
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "test": "node --import tsx node_modules/mocha/bin/mocha.js src/**/*.test.ts --colors --bail",
     "lint": "eslint src/",
-    "bench": "node --import tsx src/sparstogram.bench.ts",
-    "prepublishOnly": "npm run lint && npm run build && npm run doc"
+    "bench": "node --expose-gc --import tsx src/sparstogram.bench.ts",
+    "bump": "bash scripts/bump.sh",
+    "pub": "bash scripts/pub.sh",
+    "prepublishOnly": "npm run lint && npm run build"
   },
   "repository": {
     "type": "git",
