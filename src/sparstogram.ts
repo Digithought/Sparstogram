@@ -170,7 +170,7 @@ export class Sparstogram {
 	 * @throws {Error} If any centroid count is less than 1
 	 * @throws {Error} If any centroid variance is negative
 	 */
-	append(...centroids: Centroid[]) {
+	append(...centroids: Centroid[]): number {
 		for (const centroid of centroids) {
 			if (!Number.isFinite(centroid.value)) {
 				throw new Error("Centroid value must be a finite number");
@@ -263,9 +263,10 @@ export class Sparstogram {
 			if (remainingRank <= entry.count) {
 				const positiveRank = rank >= 0 ? rank : (this._count + rank + 1);
 				const offset = rank >= 0 ? remainingRank - 1 : (entry.count - remainingRank);
+				const { loss: _, ...centroid } = entry;
 				return {
 					rank: positiveRank,
-					centroid: entry,
+					centroid,
 					offset,
 					value: inferValueFromOffset(offset, entry)
 				};
@@ -319,7 +320,8 @@ export class Sparstogram {
 		if (this._markers) {
 			const marker = this._markers[index];
 			if (marker) {
-				return { ...marker, value: inferValueFromOffset(marker.offset, marker.centroid) };
+				const { loss: _, ...centroid } = marker.centroid as CentroidEntry;
+				return { ...marker, centroid, value: inferValueFromOffset(marker.offset, marker.centroid) };
 			}
 		}
 		throw new Error("Invalid marker - not in list of markers given to constructor");
@@ -376,7 +378,8 @@ export class Sparstogram {
 	*ascending(criteria?: Criteria): IterableIterator<Centroid> {
 		const startPath = this.criteriaToPath(criteria) ?? this._centroids.first();
 		for (const path of this._centroids.ascending(startPath)) {
-			yield this._centroids.at(path)!;
+			const { loss: _, ...centroid } = this._centroids.at(path)!;
+			yield centroid;
 		}
 	}
 
@@ -387,7 +390,8 @@ export class Sparstogram {
 	*descending(criteria?: Criteria): IterableIterator<Centroid> {
 		const startPath = this.criteriaToPath(criteria) ?? this._centroids.last();
 		for (const path of this._centroids.descending(startPath)) {
-			yield this._centroids.at(path)!;
+			const { loss: _, ...centroid } = this._centroids.at(path)!;
+			yield centroid;
 		}
 	}
 

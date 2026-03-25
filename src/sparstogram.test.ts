@@ -688,15 +688,14 @@ describe('API Surface Review', () => {
 	});
 
 	describe('CentroidEntry leak through iterators', () => {
-		it('BUG: iterators expose internal loss field on centroids', () => {
+		it('iterators do not expose internal loss field on centroids', () => {
 			const s = new Sparstogram(10);
 			[10, 20, 30].forEach(v => s.add(v));
 			for (const c of s.ascending()) {
 				// The declared return type is Centroid (value, variance, count)
-				// but the actual runtime object is CentroidEntry which also has loss
+				// loss should be stripped at the public boundary
 				const keys = Object.keys(c);
-				// This documents the leak — loss field is present at runtime
-				expect(keys).to.include('loss');
+				expect(keys).to.not.include('loss');
 			}
 		});
 	});
@@ -1714,6 +1713,55 @@ describe('Performance & Scalability', () => {
 			expect(m).to.have.property('rank');
 			expect(m).to.have.property('centroid');
 			expect(m).to.have.property('offset');
+		});
+	});
+
+	describe('public API does not leak internal loss property', () => {
+		it('ascending() centroids should not have a loss property', () => {
+			const hist = new Sparstogram(5);
+			for (let i = 0; i < 10; i++) hist.add(i);
+			for (const centroid of hist.ascending()) {
+				expect(centroid).to.not.have.property('loss');
+			}
+		});
+
+		it('descending() centroids should not have a loss property', () => {
+			const hist = new Sparstogram(5);
+			for (let i = 0; i < 10; i++) hist.add(i);
+			for (const centroid of hist.descending()) {
+				expect(centroid).to.not.have.property('loss');
+			}
+		});
+
+		it('valueAt() centroid should not have a loss property', () => {
+			const hist = new Sparstogram(5);
+			for (let i = 0; i < 10; i++) hist.add(i);
+			const result = hist.valueAt(1);
+			expect(result.centroid).to.not.have.property('loss');
+		});
+
+		it('quantileAt() centroid should not have a loss property', () => {
+			const hist = new Sparstogram(5);
+			for (let i = 0; i < 10; i++) hist.add(i);
+			const result = hist.quantileAt(0.5);
+			expect(result.centroid).to.not.have.property('loss');
+		});
+
+		it('markerAt() centroid should not have a loss property', () => {
+			const hist = new Sparstogram(5, [0.5]);
+			for (let i = 0; i < 10; i++) hist.add(i);
+			const result = hist.markerAt(0);
+			expect(result.centroid).to.not.have.property('loss');
+		});
+
+		it('mergeFrom still works after stripping loss from ascending()', () => {
+			const a = new Sparstogram(10);
+			const b = new Sparstogram(10);
+			for (let i = 0; i < 5; i++) a.add(i);
+			for (let i = 5; i < 10; i++) b.add(i);
+			a.mergeFrom(b);
+			expect(a.count).to.equal(10);
+			expect(a.centroidCount).to.equal(10);
 		});
 	});
 
