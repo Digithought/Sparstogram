@@ -192,6 +192,9 @@ export class Sparstogram {
 	 * If you want to reduce memory usage, or monitor loss, use an iterator with sequential calls to append rather than this method.
 	 */
 	mergeFrom(other: Sparstogram) {
+		if (other === this) {
+			throw new Error("Cannot merge a histogram into itself");
+		}
 		this._count += other.count;
 		for (const centroid of other.ascending()) {
 			this.insertOrIncrementBucket(centroid);

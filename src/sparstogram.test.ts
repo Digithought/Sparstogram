@@ -784,28 +784,12 @@ describe('Edge Cases & Robustness', () => {
 	});
 
 	describe('mergeFrom(self)', () => {
-		it('BUG: self-merge mutates while iterating — iterator invalidation', () => {
+		it('self-merge throws to prevent iterator invalidation', () => {
 			const s = new Sparstogram(100);
 			s.add(1);
 			s.add(2);
 			s.add(3);
-			const countBefore = s.count;
-			// mergeFrom(self) iterates self.ascending() while calling insertOrIncrementBucket on self
-			// This is iterator invalidation — behavior is undefined
-			// Depending on tree implementation, it may loop infinitely, skip entries, or double-count
-			// We just verify it doesn't throw and document the resulting state
-			let threw = false;
-			try {
-				s.mergeFrom(s);
-			} catch {
-				threw = true;
-			}
-			// Document observed behavior: count is doubled because mergeFrom adds other.count first
-			// The actual centroids may be wrong due to iterator invalidation
-			if (!threw) {
-				// Count was incremented by other.count (which is self.count) at the start of mergeFrom
-				expect(s.count).to.equal(countBefore * 2);
-			}
+			expect(() => s.mergeFrom(s)).to.throw("Cannot merge a histogram into itself");
 		});
 	});
 
