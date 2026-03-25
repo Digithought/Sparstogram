@@ -788,7 +788,11 @@ describe('Edge Cases & Robustness', () => {
 			s.add(1);
 			s.add(2);
 			s.add(3);
+			const countBefore = s.count;
+			const centroidsBefore = s.centroidCount;
 			expect(() => s.mergeFrom(s)).to.throw("Cannot merge a histogram into itself");
+			expect(s.count).to.equal(countBefore, 'count unchanged after rejected self-merge');
+			expect(s.centroidCount).to.equal(centroidsBefore, 'centroidCount unchanged after rejected self-merge');
 		});
 	});
 
