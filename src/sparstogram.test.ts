@@ -756,61 +756,31 @@ describe('API Surface Review', () => {
 describe('Edge Cases & Robustness', () => {
 
 	describe('add(NaN)', () => {
-		it('BUG: NaN corrupts the B+Tree — comparisons always false', () => {
+		it('add(NaN) throws — NaN would corrupt the B+Tree', () => {
 			const s = new Sparstogram(10);
 			s.add(1);
 			s.add(2);
-			s.add(NaN); // No validation; silently inserts
-			// NaN breaks ordering: NaN < x and NaN > x are both false
-			// The centroid count increases but the tree is now in an inconsistent state
-			expect(s.centroidCount).to.equal(3); // NaN was inserted
-			expect(s.count).to.equal(3);
-			// Iterating may or may not include NaN depending on tree internals,
-			// but the core issue is that comparisons with NaN are always false
-			const values = Array.from(s.ascending()).map(c => c.value);
-			// NaN should not be in a well-ordered list; its presence indicates corruption
-			const hasNaN = values.some(v => Number.isNaN(v));
-			expect(hasNaN).to.be.true; // Documents the bug: NaN is in the tree
+			expect(() => s.add(NaN)).to.throw("Value must be a finite number");
+			expect(s.centroidCount).to.equal(2); // NaN was rejected
+			expect(s.count).to.equal(2);
 		});
 	});
 
 	describe('add(Infinity) and add(-Infinity)', () => {
-		it('Infinity is orderable — B+Tree handles it', () => {
+		it('add(Infinity) throws — Infinity breaks comparator', () => {
 			const s = new Sparstogram(10);
-			s.add(-Infinity);
 			s.add(0);
-			s.add(Infinity);
-			const values = Array.from(s.ascending()).map(c => c.value);
-			expect(values).to.deep.equal([-Infinity, 0, Infinity]);
-			expect(s.count).to.equal(3);
-			expect(s.centroidCount).to.equal(3);
+			expect(() => s.add(Infinity)).to.throw("Value must be a finite number");
+			expect(s.centroidCount).to.equal(1); // Infinity was rejected
+			expect(s.count).to.equal(1);
 		});
 
-		it('BUG: rankAt produces NaN for Infinity values — comparator returns NaN for Inf-Inf', () => {
+		it('add(-Infinity) throws — -Infinity breaks comparator', () => {
 			const s = new Sparstogram(10);
-			s.add(-Infinity);
 			s.add(0);
-			s.add(Infinity);
-			// The BTree comparator (a, b) => a - b produces NaN when
-			// a = -Infinity, b = -Infinity (since -Inf - (-Inf) = NaN)
-			// This means find(-Infinity) may not locate the exact match
-			// and the query falls into an interpolation path that also fails
-			expect(s.rankAt(-Infinity)).to.be.NaN;
-			// Finite values with Infinity neighbors may or may not work
-			// depending on which interpolation path is taken
-			expect(s.rankAt(0)).to.equal(2); // 0 is an exact match, no interpolation needed
-			expect(s.rankAt(Infinity)).to.be.NaN; // Same comparator issue: Inf - Inf = NaN
-		});
-
-		it('Infinity compresses without error', () => {
-			const s = new Sparstogram(3);
-			s.add(-Infinity);
-			s.add(-1);
-			s.add(0);
-			s.add(1);
-			s.add(Infinity);
-			// Should compress down to 3 centroids without throwing
-			expect(s.centroidCount).to.equal(3);
+			expect(() => s.add(-Infinity)).to.throw("Value must be a finite number");
+			expect(s.centroidCount).to.equal(1); // -Infinity was rejected
+			expect(s.count).to.equal(1);
 		});
 	});
 

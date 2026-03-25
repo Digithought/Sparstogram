@@ -150,6 +150,9 @@ export class Sparstogram {
 	 * @returns The loss incurred by compression, if any
 	 */
 	add(value: number): number {
+		if (!Number.isFinite(value)) {
+			throw new Error("Value must be a finite number (NaN and Infinity are not supported)");
+		}
 		++this._count;
 		this.insertOrIncrementBucket({ value, variance: 0, count: 1 });
 		if (this._centroidCount > this._maxCentroids) {
@@ -165,6 +168,9 @@ export class Sparstogram {
 	 */
 	append(...centroids: Centroid[]) {
 		for (const centroid of centroids) {
+			if (!Number.isFinite(centroid.value)) {
+				throw new Error("Centroid value must be a finite number");
+			}
 			if (centroid.count < 1) {
 				throw new Error("Centroid count must be at least 1");
 			}
