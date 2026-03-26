@@ -415,7 +415,7 @@ export class Sparstogram {
 	// and |dens(prior,curr) - dens(curr,r)|.  The score used in _losses is:
 	//   score = baseLoss * (eps + 0.5*(leftCurv + rightCurv))
 	// This cheaply preserves bends (peaks/tails) while keeping operations local.
-	private getPriorScore(path: Path<number, CentroidEntry>, newCentroid: Centroid): number {
+	private getPriorScore(path: Path<number, CentroidEntry>, newCentroid: CentroidEntry): number {
 		const prior = this._centroids.prior(path);
 		if (!prior.on) return Infinity;
 		const a = this._centroids.at(prior)!; // prior
@@ -429,7 +429,7 @@ export class Sparstogram {
 		return base * (SCORE_EPSILON + curv);
 	}
 
-	private updateNextScore(path: Path<number, CentroidEntry>, newCentroid: Centroid): number {
+	private updateNextScore(path: Path<number, CentroidEntry>, newCentroid: CentroidEntry): number {
 		const next = this._centroids.next(path);
 		if (!next.on) return Infinity;
 		const a = newCentroid; // prior in pair
@@ -450,6 +450,13 @@ export class Sparstogram {
 		return 0.5 * (left + right);
 	}
 
+	/** Curvature-aware score for merging pair (a, b) given optional outer neighbors l and r */
+	private scoreForPair(l: Centroid | undefined, a: Centroid, b: Centroid, r: Centroid | undefined): number {
+		const base = this.computeLoss(a, b);
+		const curv = this.localCurvature(l, a, b, r);
+		return base * (SCORE_EPSILON + curv);
+	}
+
 	// Signature to allow binding via prototype to helper below
 	private edgeContribution(u: Centroid, v: Centroid): number { return edgeContribution(u, v); }
 
@@ -467,15 +474,34 @@ export class Sparstogram {
 			const beforeL = priorCentroid ? this.edgeContribution(priorCentroid, entry) : 0;
 			const afterR = nextCentroid ? this.edgeContribution(entry, nextCentroid) : 0;
 
-			const newCentroid = combineSharedMean(entry, centroid);
-			const priorScore = this.getPriorScore(path, newCentroid);
-			this._centroids.updateAt(path, { ...newCentroid, loss: priorScore });
-			this._losses.updateAt(this._losses.find(entry), { loss: priorScore, value: entry.value });
-			this.updateNext(path, newCentroid);
+			const merged = combineSharedMean(entry, centroid);
+			// Consistent CentroidEntry shape: {value, variance, count, loss}
+			const updatedEntry: CentroidEntry = { value: merged.value, variance: merged.variance, count: merged.count, loss: 0 };
+
+			// Compute prior score with pre-fetched neighbors (avoids redundant tree navigations)
+			let priorScore = Infinity;
+			if (priorCentroid) {
+				const pp = this._centroids.prior(priorPath);
+				const priorPrior = pp.on ? this._centroids.at(pp)! : undefined;
+				priorScore = this.scoreForPair(priorPrior, priorCentroid, updatedEntry, nextCentroid);
+			}
+			this._centroids.updateAt(path, { value: merged.value, variance: merged.variance, count: merged.count, loss: priorScore });
+			this._losses.updateAt(this._losses.find({ loss: entry.loss, value: entry.value }), { loss: priorScore, value: entry.value });
+
+			// Update next score with pre-fetched neighbors
+			const nextPath2 = this._centroids.next(path);
+			if (nextPath2.on) {
+				const nextEntry = this._centroids.at(nextPath2)!;
+				const nn = this._centroids.next(nextPath2);
+				const nextNext = nn.on ? this._centroids.at(nn)! : undefined;
+				const nextScore = this.scoreForPair(priorCentroid, updatedEntry, nextEntry, nextNext);
+				this._centroids.updateAt(nextPath2, { value: nextEntry.value, variance: nextEntry.variance, count: nextEntry.count, loss: nextScore });
+				this._losses.updateAt(this._losses.find({ loss: nextEntry.loss, value: nextEntry.value }), { loss: nextScore, value: nextEntry.value });
+			}
 
 			// update J locally
-			const afterL2 = priorCentroid ? this.edgeContribution(priorCentroid, newCentroid) : 0;
-			const afterR2 = nextCentroid ? this.edgeContribution(newCentroid, nextCentroid) : 0;
+			const afterL2 = priorCentroid ? this.edgeContribution(priorCentroid, updatedEntry) : 0;
+			const afterR2 = nextCentroid ? this.edgeContribution(updatedEntry, nextCentroid) : 0;
 			this._tightnessJ += -beforeL - afterR + afterL2 + afterR2;
 		} else {
 			++this._centroidCount;
@@ -484,21 +510,22 @@ export class Sparstogram {
 			// Get the actual centroids before inserting (paths will be invalid after)
 			const priorCentroid = prior.on ? this._centroids.at(prior)! : undefined;
 			const nextCentroid = next.on ? this._centroids.at(next)! : undefined;
-			const newPath = this._centroids.insert({ ...centroid, loss: Infinity });
-			const priorScore = this.getPriorScore(newPath, centroid);
-			this._centroids.updateAt(newPath, { ...centroid, loss: priorScore });
+			const newEntry: CentroidEntry = { value: centroid.value, variance: centroid.variance, count: centroid.count, loss: Infinity };
+			const newPath = this._centroids.insert(newEntry);
+			const priorScore = this.getPriorScore(newPath, newEntry);
+			this._centroids.updateAt(newPath, { value: centroid.value, variance: centroid.variance, count: centroid.count, loss: priorScore });
 			this._losses.insert({ loss: priorScore, value: centroid.value });
 			// update J locally for edge splits
 			if (priorCentroid && nextCentroid) {
 				this._tightnessJ -= this.edgeContribution(priorCentroid, nextCentroid);
-				this._tightnessJ += this.edgeContribution(priorCentroid, centroid);
-				this._tightnessJ += this.edgeContribution(centroid, nextCentroid);
+				this._tightnessJ += this.edgeContribution(priorCentroid, newEntry);
+				this._tightnessJ += this.edgeContribution(newEntry, nextCentroid);
 			} else if (priorCentroid) {
-				this._tightnessJ += this.edgeContribution(priorCentroid, centroid);
+				this._tightnessJ += this.edgeContribution(priorCentroid, newEntry);
 			} else if (nextCentroid) {
-				this._tightnessJ += this.edgeContribution(centroid, nextCentroid);
+				this._tightnessJ += this.edgeContribution(newEntry, nextCentroid);
 			}
-			this.updateNext(newPath, centroid);
+			this.updateNext(newPath, newEntry);
 			this.updateMarkers(centroid.value);
 		}
 	}
@@ -544,13 +571,13 @@ export class Sparstogram {
 		}
 	}
 
-	private updateNext(path: Path<number, CentroidEntry>, newCentroid: Centroid) {
+	private updateNext(path: Path<number, CentroidEntry>, newCentroid: CentroidEntry) {
 		const next = this._centroids.next(path);
 		if (next.on) {
 			const nextEntry = this._centroids.at(next)!;
 			const newScore = this.updateNextScore(path, newCentroid);
-			this._centroids.updateAt(next, { ...nextEntry, loss: newScore });
-			this._losses.updateAt(this._losses.find(nextEntry), { loss: newScore, value: nextEntry.value });
+			this._centroids.updateAt(next, { value: nextEntry.value, variance: nextEntry.variance, count: nextEntry.count, loss: newScore });
+			this._losses.updateAt(this._losses.find({ loss: nextEntry.loss, value: nextEntry.value }), { loss: newScore, value: nextEntry.value });
 		}
 	}
 
@@ -607,8 +634,8 @@ export class Sparstogram {
 			const newCount = priorEntry.count + minEntry.count;
 			const newVariance = combinedVariance(priorEntry, minEntry);
 			const xWeightedMedian = (priorEntry.count >= minEntry.count) ? priorEntry.value : minEntry.value;
-			const newCentroid = { value: xWeightedMedian, count: newCount, variance: newVariance };
-			const newEntry = { ...newCentroid, loss: Infinity }; // placeholder; real score set after insert
+			// Consistent CentroidEntry shape: {value, variance, count, loss}
+			const newEntry: CentroidEntry = { value: xWeightedMedian, variance: newVariance, count: newCount, loss: Infinity };
 
 			// Update markers
 			if (this._markers) {
@@ -634,16 +661,16 @@ export class Sparstogram {
 			this._centroids.deleteAt(priorPath);
 			this._centroids.deleteAt(this._centroids.find(minEntry.value)!);
 			const newPath = this._centroids.insert(newEntry);
-			const newScore = this.getPriorScore(newPath, newCentroid);
-			this._centroids.updateAt(newPath, { ...newEntry, loss: newScore });
+			const newScore = this.getPriorScore(newPath, newEntry);
+			this._centroids.updateAt(newPath, { value: newEntry.value, variance: newEntry.variance, count: newEntry.count, loss: newScore });
 			this._losses.deleteAt(minLossPath);
-			this._losses.deleteAt(this._losses.find(priorEntry)!);
+			this._losses.deleteAt(this._losses.find({ loss: priorEntry.loss, value: priorEntry.value })!);
 			this._losses.insert({ loss: newScore, value: newEntry.value });
-			this.updateNext(newPath, newCentroid);
+			this.updateNext(newPath, newEntry);
 
 			// Add new edge contributions
-			if (priorPriorEntry) this._tightnessJ += this.edgeContribution(priorPriorEntry, newCentroid);
-			if (nextEntry) this._tightnessJ += this.edgeContribution(newCentroid, nextEntry);
+			if (priorPriorEntry) this._tightnessJ += this.edgeContribution(priorPriorEntry, newEntry);
+			if (nextEntry) this._tightnessJ += this.edgeContribution(newEntry, nextEntry);
 
 			this._centroidCount--; // Reflect the merge in the bucket count
 
@@ -675,7 +702,7 @@ function combineSharedMean(centroidA: Centroid, centroidB: Centroid) {
 	const count = centroidA.count + centroidB.count;
 	const variance = (centroidA.variance * (centroidA.count - 1) + centroidB.variance * (centroidB.count - 1))
 		/ (count - 1);	// Remove DOF
-	return { value: centroidA.value, count, variance };
+	return { value: centroidA.value, variance, count };
 }
 
 /** Estimates combined variance if merged, considering the weighted mean */
