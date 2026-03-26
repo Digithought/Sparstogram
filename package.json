@@ -19,7 +19,7 @@
     "lint": "eslint src/",
     "bench": "node --expose-gc --import tsx src/sparstogram.bench.ts",
     "bump": "bumpp --execute=\"npm test && npm run lint && npm run build\"",
-    "pub": "bash scripts/pub.sh",
+    "pub": "node scripts/publish.cjs",
     "prepublishOnly": "npm run lint && npm run build"
   },
   "repository": {
@@ -50,10 +50,10 @@
     "@types/mocha": "^10.0.10",
     "@typescript-eslint/eslint-plugin": "^8.32.1",
     "@typescript-eslint/parser": "^8.32.1",
+    "bumpp": "^10.4.0",
     "chai": "^5.2.0",
     "eslint": "^9.27.0",
     "mocha": "^11.4.0",
-    "bumpp": "^10.4.0",
     "rimraf": "^6.0.1",
     "tinybench": "^6.0.0",
     "tsx": "^4.21.0",
