@@ -1,6 +1,6 @@
 {
   "name": "sparstogram",
-  "version": "0.9.5",
+  "version": "1.0.0",
   "description": "Sparse, adaptive, scalable histogram in TypeScript",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,7 +18,7 @@
     "test": "node --import tsx node_modules/mocha/bin/mocha.js src/**/*.test.ts --colors --bail",
     "lint": "eslint src/",
     "bench": "node --expose-gc --import tsx src/sparstogram.bench.ts",
-    "bump": "bash scripts/bump.sh",
+    "bump": "bumpp --execute=\"npm test && npm run lint && npm run build\"",
     "pub": "bash scripts/pub.sh",
     "prepublishOnly": "npm run lint && npm run build"
   },
@@ -53,6 +53,7 @@
     "chai": "^5.2.0",
     "eslint": "^9.27.0",
     "mocha": "^11.4.0",
+    "bumpp": "^10.4.0",
     "rimraf": "^6.0.1",
     "tinybench": "^6.0.0",
     "tsx": "^4.21.0",
