@@ -210,7 +210,7 @@ Requires Node.js 16.11 or later (ES2022).
 ### Creating a Sparstogram
 
 ```ts
-import { Sparstogram } from "sparstogram";
+import { Sparstogram, Quantile, Marker } from "sparstogram";
 
 // Initialize a Sparstogram with a maximum of 100 centroids and a quantile marker for maintaining the median
 const histogram = new Sparstogram(100, [0.5]);
@@ -269,6 +269,15 @@ for (const entry of histogram.descending({ markerIndex: 0 })) {
 for (const entry of histogram.ascending({ value: 2.5 })) {
   console.log(entry);
 }
+
+// Iterate from the 80th percentile forwards
+for (const entry of histogram.ascending({ quantile: 0.8 })) {
+  console.log(entry);
+}
+
+// Type the return values
+const q: Quantile = histogram.valueAt(2);  // rank, centroid, offset, value
+const m: Marker = histogram.quantileAt(0.5); // rank, centroid, offset
 ```
 
 ### Analyzing Histogram Peaks
@@ -313,6 +322,69 @@ const centroids = [
 const maxLoss = histogram.append(...centroids);
 console.log(`Max loss from batch: ${maxLoss}`);
 ```
+
+## Benchmarks
+
+A formal benchmark suite is included using [tinybench](https://github.com/tinylibs/tinybench). Run it with:
+
+```bash
+npm run bench
+```
+
+This outputs a human-readable table to stderr and machine-readable JSON to stdout. For clean JSON piping in CI:
+
+```bash
+node --expose-gc --import tsx src/sparstogram.bench.ts > results.json
+```
+
+### Representative Results
+
+Results from a typical run (actual numbers vary by hardware):
+
+#### add() Hot Path (10K values)
+
+| maxCentroids | Avg Latency (ms) | Throughput (ops/s) |
+|-------------|------------------|--------------------|
+| 50          | ~106             | ~10                |
+| 500         | ~158             | ~6                 |
+| 5000        | ~153             | ~7                 |
+
+#### Compression-Heavy add() (5K distinct values)
+
+| maxCentroids | Avg Latency (ms) | Throughput (ops/s) |
+|-------------|------------------|--------------------|
+| 3           | ~16              | ~63                |
+| 5           | ~17              | ~59                |
+| 10          | ~18              | ~56                |
+
+#### mergeFrom()
+
+| Source Size | Avg Latency (ms) | Throughput (ops/s) |
+|------------|------------------|--------------------|
+| 100        | ~1.3             | ~773               |
+| 1000       | ~15              | ~65                |
+| 5000       | ~69              | ~15                |
+
+#### Bulk Compression
+
+5000 → 50 centroids: ~72ms avg
+
+#### Memory per Centroid
+
+| Centroid Count | Bytes/Centroid |
+|---------------|----------------|
+| 1000          | ~269           |
+| 5000          | ~242           |
+| 10000         | ~237           |
+
+### Benchmark Categories (23 entries)
+
+1. **add() hot path** — maxCentroids = 50, 500, 5000; 10K sin(i)*1000 values each
+2. **Compression-heavy add()** — maxCentroids = 3, 5, 10; 5K distinct values
+3. **Bulk compression** — populate 5000 centroids, then set maxCentroids=50
+4. **mergeFrom()** — merge two histograms of N = 100, 1000, 5000 into maxCentroids=100
+5. **peaks()** — centroids = 100, 500, 2000; smoothing = 1, 3, 10 (9 combos)
+6. **Memory per centroid** — heap delta at centroidCount = 100, 1000, 5000, 10000
 
 ## Research and Advanced Topics
 
@@ -583,8 +655,11 @@ Contributions to the Digitree Sparstogram library are welcome! Here's how you ca
 ### Environment
 
 - If using VSCode use the editorconfig plugin to honor the conventions in `.editorconfig`
-- Build: `yarn build` or `npm run build`
-- Test: `yarn test` or `npm test`
+- Build: `npm run build`
+- Test: `npm test`
+- Lint: `npm run lint` (ESLint 9 with TypeScript rules)
+- Bench: `npm run bench`
+- CI: GitHub Actions runs tests and build on push/PR to `master` (Node.js 20 and 22 matrix)
 
 ## License
 
