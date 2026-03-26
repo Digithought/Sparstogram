@@ -21,7 +21,7 @@ try {
 	const unstaged = execSync('git diff --quiet', { stdio: 'pipe' }).toString();
 
 	console.log(`Publishing ${version} to npm...`);
-	execSync('npm publish --access public', { stdio: 'inherit' });
+	execSync('yarn npm publish --access public', { stdio: 'inherit' });
 
 	console.log('Pushing to remote...');
 	execSync('git push --follow-tags', { stdio: 'inherit' });
