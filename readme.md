@@ -345,37 +345,37 @@ Results from a typical run (actual numbers vary by hardware):
 
 | maxCentroids | Avg Latency (ms) | Throughput (ops/s) |
 |-------------|------------------|--------------------|
-| 50          | ~106             | ~10                |
-| 500         | ~158             | ~6                 |
-| 5000        | ~153             | ~7                 |
+| 50          | ~69              | ~15                |
+| 500         | ~99              | ~10                |
+| 5000        | ~99              | ~10                |
 
 #### Compression-Heavy add() (5K distinct values)
 
 | maxCentroids | Avg Latency (ms) | Throughput (ops/s) |
 |-------------|------------------|--------------------|
-| 3           | ~16              | ~63                |
-| 5           | ~17              | ~59                |
-| 10          | ~18              | ~56                |
+| 3           | ~14              | ~73                |
+| 5           | ~14              | ~71                |
+| 10          | ~15              | ~68                |
 
 #### mergeFrom()
 
 | Source Size | Avg Latency (ms) | Throughput (ops/s) |
 |------------|------------------|--------------------|
-| 100        | ~1.3             | ~773               |
-| 1000       | ~15              | ~65                |
-| 5000       | ~69              | ~15                |
+| 100        | ~1.0             | ~1100              |
+| 1000       | ~12              | ~87                |
+| 5000       | ~47              | ~21                |
 
 #### Bulk Compression
 
-5000 → 50 centroids: ~72ms avg
+5000 → 50 centroids: ~38ms avg
 
 #### Memory per Centroid
 
 | Centroid Count | Bytes/Centroid |
 |---------------|----------------|
-| 1000          | ~269           |
-| 5000          | ~242           |
-| 10000         | ~237           |
+| 1000          | ~245           |
+| 5000          | ~227           |
+| 10000         | ~212           |
 
 ### Benchmark Categories (23 entries)
 
